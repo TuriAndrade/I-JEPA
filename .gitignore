@@ -1,6 +1,9 @@
 # Datasets
 data/
 
+# Virtual env
+JEPA_VENV/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
