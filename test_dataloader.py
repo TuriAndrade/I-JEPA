@@ -1,5 +1,6 @@
 import torch
 from dataloaders import HDF5Dataset
+from tqdm import tqdm
 
 
 def transform_data(data):
@@ -8,7 +9,7 @@ def transform_data(data):
 
 # Configuration for the dataset
 dataset_config = {
-    "hdf5_file": "/home/ubuntu/JEPA_TCC/data/cifar10.hdf5",  # Path to your HDF5 file
+    "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",  # Path to your HDF5 file
     "group": "train",  # Use the training group
     "data_dataset": "images",  # Dataset name for images
     "labels_dataset": "labels",  # Dataset name for labels
@@ -24,7 +25,7 @@ def test_dataloader(rank, num_workers):
     # Get the DataLoader
     loader = HDF5Dataset.get_dataloader(
         dataset_config,
-        batch_size=128,  # You can adjust batch size as needed
+        batch_size=256,  # You can adjust batch size as needed
         num_workers=num_workers,
         rank=rank,  # Rank for the current process
         world_size=4,  # Total number of GPUs
@@ -35,22 +36,21 @@ def test_dataloader(rank, num_workers):
 
     # Print the total number of batches
     total_batches = len(loader)
-    print(f"Total number of batches in the loader: {total_batches}")
+    print(f"Total number of batches in the loader for rank {rank}: {total_batches}")
 
     # Fetch a few batches and print their shapes
-    for i, (data, labels) in enumerate(loader):
-        print(
-            f"Rank {rank} - Batch {i + 1}: data shape: {data.shape}, labels shape: {labels.shape}"
-        )
-        if i == 5:  # Just print first 10 batches
-            break
+    for _ in tqdm(loader, total=len(loader), desc="Batches", disable=rank != 0):
+        pass
 
 
 if __name__ == "__main__":
-    num_workers = 2  # Number of workers for data loading
+    num_workers = 4  # Number of workers for data loading
     world_size = 4  # Total number of GPUs
 
     # Use torch.multiprocessing to spawn processes
     torch.multiprocessing.spawn(
-        test_dataloader, args=(num_workers,), nprocs=world_size, join=True
+        test_dataloader,
+        args=(num_workers,),
+        nprocs=world_size,
+        join=True,
     )

@@ -4,3 +4,5 @@ pandas
 h5py
 timm
 einops
+tqdm
+matplotlib
