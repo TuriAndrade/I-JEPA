@@ -1,0 +1,378 @@
+from torch.distributed import init_process_group, destroy_process_group
+from datetime import timedelta
+from torch.nn.parallel import DistributedDataParallel as DDP
+from dataloaders import HDF5Dataset
+from report import ReportGenerator
+from tqdm import tqdm
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+)
+import torch
+import torch.multiprocessing as mp
+import numpy as np
+import pandas as pd
+import os
+
+
+class DDPClassificationTrainer:
+    def __init__(
+        self,
+        model,
+        model_config,
+        model_name,
+        criterion,
+        criterion_config,
+        optimizer,
+        optimizer_config,
+        hdf5_dataset_train_config,
+        hdf5_dataset_val_config,
+        hdf5_dataset_test_config,
+        save_path,
+        params_to_save,
+        batch_size,
+        epochs,
+        master_addr,
+        master_port,
+        backend,
+        main_device,
+        process_timeout,
+    ):
+        self.model = model
+        self.model_config = model_config
+        self.model_name = model_name
+        self.criterion = criterion
+        self.criterion_config = criterion_config
+        self.optimizer = optimizer
+        self.optimizer_config = optimizer_config
+        self.hdf5_dataset_train_config = hdf5_dataset_train_config
+        self.hdf5_dataset_val_config = hdf5_dataset_val_config
+        self.hdf5_dataset_test_config = hdf5_dataset_test_config
+        self.save_path = save_path
+        self.params_to_save = params_to_save
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.master_addr = master_addr
+        self.master_port = master_port
+        self.backend = backend
+        self.main_device = main_device
+        self.process_timeout = process_timeout
+
+        self.init_model = None
+        self.metrics = {
+            "loss": ["train", "val"],
+            "lr": ["lr"],
+        }
+        self.best_metrics_obj = {
+            "loss/val": "min",
+        }
+
+        os.makedirs(self.save_path, exist_ok=True)
+
+    def ddp_setup(self, rank, world_size):
+        init_process_group(
+            backend=self.backend,
+            rank=rank,
+            world_size=world_size,
+            init_method=f"tcp://{self.master_addr}:{self.master_port}",
+            timeout=timedelta(seconds=self.process_timeout),
+        )
+
+    def ddp_cleanup(self):
+        destroy_process_group()
+
+    def init_models(self):
+        self.init_model = self.model(**self.model_config)
+
+    def launch_ddp_models(self, device):
+        model = self.model(**self.model_config).to(device)
+        model.load_state_dict(self.init_model.state_dict())
+
+        return DDP(model, device_ids=[device])
+
+    def train_ddp(self, rank, world_size):
+        self.ddp_setup(rank, world_size)
+
+        train_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_train_config,
+            batch_size=self.batch_size,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
+        )
+
+        val_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_val_config,
+            batch_size=self.batch_size,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
+        )
+
+        self.train(
+            rank=rank,
+            train_loader=train_loader,
+            val_loader=val_loader,
+        )
+
+        self.ddp_cleanup()
+
+    def spawn_train_ddp(self):
+        self.init_models()
+
+        world_size = torch.cuda.device_count()
+
+        print("---- Initiating DDP training ----")
+        print(f"CUDA device count: {world_size}")
+        print(f"Master address: {self.master_addr}")
+        print(f"Master port: {self.master_port}")
+
+        mp.spawn(
+            self.train_ddp,
+            args=(world_size,),
+            nprocs=world_size,
+        )
+
+    def train(
+        self,
+        rank,
+        train_loader,
+        val_loader,
+    ):
+        model = self.launch_ddp_models(rank)
+        optimizer = self.optimizer(**self.optimizer_config)
+        criterion = self.criterion(**self.criterion_config)
+        report_generator = ReportGenerator(
+            save_path=self.save_path,
+            main_device=self.main_device,
+            metrics=self.metrics,
+            trainer=self,
+            params_to_save=self.params_to_save,
+            best_metrics_obj=self.best_metrics_obj,
+        )
+
+        for epoch in range(self.epochs):
+            with tqdm(
+                total=(len(train_loader) + len(val_loader)),
+                desc=f"Epoch {epoch+1}",
+                disable=(rank != self.main_device),
+            ) as bar:
+                report_generator.init_epoch_metrics_dict(
+                    epoch=epoch,
+                    device=self.main_device,
+                )
+
+                model.train()
+                for data_batch, label_batch in train_loader:
+                    data_batch = data_batch.to(rank)
+                    label_batch = label_batch.to(rank)
+
+                    model_out = model(data_batch)
+                    loss = criterion(model_out, label_batch)
+
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                    report_generator.add_epoch_metric(
+                        path="loss/train",
+                        value=loss.item(),
+                        device=rank,
+                    )
+                    bar.set_postfix(
+                        {
+                            "train_loss": report_generator.get_last_epoch_metric(
+                                path="loss/train"
+                            ),
+                            "val_loss": report_generator.get_last_epoch_metric(
+                                path="loss/val"
+                            ),
+                        }
+                    )
+                    bar.update(1)
+
+                with torch.no_grad():
+                    model.eval()
+                    for data_batch, label_batch in val_loader:
+                        data_batch = data_batch.to(rank)
+                        label_batch = label_batch.to(rank)
+
+                        model_out = model(data_batch)
+                        loss = criterion(model_out, label_batch)
+
+                        report_generator.add_epoch_metric(
+                            path="loss/val",
+                            value=loss.item(),
+                            device=rank,
+                        )
+                        bar.set_postfix(
+                            {
+                                "train_loss": report_generator.get_last_epoch_metric(
+                                    path="loss/train"
+                                ),
+                                "val_loss": report_generator.get_last_epoch_metric(
+                                    path="loss/val"
+                                ),
+                            }
+                        )
+                        bar.update(1)
+
+                report_generator.update_global_metrics(device=rank)
+
+                report_generator.save_models(
+                    models={f"last_{self.model_name}": model.module},
+                    device=rank,
+                )
+                report_generator.save_best_models(
+                    models={self.model_name: model.module},
+                    device=rank,
+                )
+                report_generator.save_metrics(device=rank)
+                report_generator.save_plots(device=rank)
+
+    def compute_metrics(self, y_true, y_pred_proba, threshold):
+        y_pred = (y_pred_proba >= threshold).astype(int)
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred)
+        recall = recall_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred)
+        auc = roc_auc_score(y_true, y_pred_proba)
+        return accuracy, precision, recall, f1, auc
+
+    def test(
+        self,
+        load_path,
+        device=0,
+        metric="accuracy",
+        n_thresholds=100,
+    ):
+        val_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_val_config,
+            batch_size=self.batch_size,
+            num_workers=1,
+            world_size=1,
+            rank=device,
+        )
+
+        test_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_test_config,
+            batch_size=self.batch_size,
+            num_workers=1,
+            world_size=1,
+            rank=device,
+        )
+
+        # Load the model and its state
+        model = self.model(**self.model_config).to(device)
+        state_dict = torch.load(load_path, map_location=device)
+        model.load_state_dict(state_dict)
+
+        # Evaluate model on validation set to find best threshold
+        val_labels = []
+        val_preds = []
+
+        with torch.no_grad():
+            model.eval()
+            with tqdm(
+                total=len(test_loader), desc="Computing model output on val set"
+            ) as bar:
+                for data_batch, label_batch in val_loader:
+                    data_batch = data_batch.to(device)
+                    label_batch = label_batch.to(device)
+
+                    model_out = model(data_batch)
+                    val_preds.append(model_out.cpu().numpy())
+                    val_labels.append(label_batch.cpu().numpy())
+
+                    bar.update(1)
+
+        val_labels = np.concatenate(val_labels)
+        val_preds = np.concatenate(val_preds)
+
+        thresholds = np.linspace(0.0, 1.0, n_thresholds)
+        best_threshold = 0.5
+        best_metric_value = 0
+
+        with tqdm(
+            total=len(thresholds), desc=f"Finding best threshold for {metric}"
+        ) as bar:
+            for threshold in thresholds:
+                accuracy, precision, recall, f1, auc = self.compute_metrics(
+                    val_labels, val_preds, threshold
+                )
+
+                if metric == "accuracy" and accuracy > best_metric_value:
+                    best_metric_value = accuracy
+                    best_threshold = threshold
+                elif metric == "precision" and precision > best_metric_value:
+                    best_metric_value = precision
+                    best_threshold = threshold
+                elif metric == "recall" and recall > best_metric_value:
+                    best_metric_value = recall
+                    best_threshold = threshold
+                elif metric == "f1" and f1 > best_metric_value:
+                    best_metric_value = f1
+                    best_threshold = threshold
+                elif metric == "auc" and auc > best_metric_value:
+                    best_metric_value = auc
+                    best_threshold = threshold
+
+                bar.update(1)
+
+        # Evaluate model on test set with best threshold
+        test_labels = []
+        test_preds = []
+
+        with torch.no_grad():
+            model.eval()
+            with tqdm(
+                total=len(test_loader), desc="Computing model output on test set"
+            ) as bar:
+                for data_batch, label_batch in test_loader:
+                    data_batch = data_batch.to(device)
+                    label_batch = label_batch.to(device)
+
+                    model_out = model(data_batch)
+                    test_preds.append(model_out.cpu().numpy())
+                    test_labels.append(label_batch.cpu().numpy())
+
+                    bar.update(1)
+
+        test_labels = np.concatenate(test_labels)
+        test_preds = np.concatenate(test_preds)
+
+        accuracy, precision, recall, f1, auc = self.compute_metrics(
+            test_labels, test_preds, best_threshold
+        )
+
+        print(f"Test Metrics @ Best Threshold ({best_threshold:.2f}):")
+        print(f"Accuracy: {accuracy:.4f}")
+        print(f"Precision: {precision:.4f}")
+        print(f"Recall: {recall:.4f}")
+        print(f"F1 Score: {f1:.4f}")
+        print(f"AUC: {auc:.4f}")
+
+        test_output_dir = os.path.join(self.save_path, "test_output")
+        os.makedirs(test_output_dir, exist_ok=True)
+
+        # Save metrics to a CSV file
+        metrics_dict = {
+            "Metric": ["Accuracy", "Precision", "Recall", "F1 Score", "AUC"],
+            "Value": [accuracy, precision, recall, f1, auc],
+            "Threshold": [best_threshold] * 5,
+        }
+
+        metrics_df = pd.DataFrame(metrics_dict)
+        metrics_csv_path = os.path.join(test_output_dir, "test_metrics.csv")
+        metrics_df.to_csv(metrics_csv_path, index=False)
+
+        # Save load path information to a txt file
+        load_path_txt = os.path.join(test_output_dir, "load_path.txt")
+        with open(load_path_txt, "w") as f:
+            f.write(f"Model loaded from: {load_path}\n")
+
+        print(f"Metrics saved to {metrics_csv_path}")
+        print(f"Model load path saved to {load_path_txt}")
