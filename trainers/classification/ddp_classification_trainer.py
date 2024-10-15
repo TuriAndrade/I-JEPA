@@ -11,8 +11,10 @@ from sklearn.metrics import (
     f1_score,
     roc_auc_score,
 )
+from optimizers import adamw_warmup_consine_schd
 import torch
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 import os
@@ -24,10 +26,6 @@ class DDPClassificationTrainer:
         model,
         model_config,
         model_name,
-        criterion,
-        criterion_config,
-        optimizer,
-        optimizer_config,
         hdf5_dataset_train_config,
         hdf5_dataset_val_config,
         hdf5_dataset_test_config,
@@ -35,6 +33,12 @@ class DDPClassificationTrainer:
         params_to_save,
         batch_size,
         epochs,
+        start_lr,
+        ref_lr,
+        final_lr,
+        wd,
+        final_wd,
+        warmup_epochs,
         master_addr,
         master_port,
         backend,
@@ -44,16 +48,18 @@ class DDPClassificationTrainer:
         self.model = model
         self.model_config = model_config
         self.model_name = model_name
-        self.criterion = criterion
-        self.criterion_config = criterion_config
-        self.optimizer = optimizer
-        self.optimizer_config = optimizer_config
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.hdf5_dataset_val_config = hdf5_dataset_val_config
         self.hdf5_dataset_test_config = hdf5_dataset_test_config
         self.save_path = save_path
         self.params_to_save = params_to_save
         self.epochs = epochs
+        self.start_lr = start_lr
+        self.ref_lr = ref_lr
+        self.final_lr = final_lr
+        self.wd = wd
+        self.final_wd = final_wd
+        self.warmup_epochs = warmup_epochs
         self.batch_size = batch_size
         self.master_addr = master_addr
         self.master_port = master_port
@@ -64,7 +70,8 @@ class DDPClassificationTrainer:
         self.init_model = None
         self.metrics = {
             "loss": ["train", "val"],
-            "lr": ["lr"],
+            "learning_rate": ["learning_rate"],
+            "weight_decay": ["weight_decay"],
         }
         self.best_metrics_obj = {
             "loss/val": "min",
@@ -96,26 +103,9 @@ class DDPClassificationTrainer:
     def train_ddp(self, rank, world_size):
         self.ddp_setup(rank, world_size)
 
-        train_loader = HDF5Dataset.get_dataloader(
-            self.hdf5_dataset_train_config,
-            batch_size=self.batch_size,
-            num_workers=world_size,
-            world_size=world_size,
-            rank=rank,
-        )
-
-        val_loader = HDF5Dataset.get_dataloader(
-            self.hdf5_dataset_val_config,
-            batch_size=self.batch_size,
-            num_workers=world_size,
-            world_size=world_size,
-            rank=rank,
-        )
-
         self.train(
             rank=rank,
-            train_loader=train_loader,
-            val_loader=val_loader,
+            world_size=world_size,
         )
 
         self.ddp_cleanup()
@@ -139,12 +129,37 @@ class DDPClassificationTrainer:
     def train(
         self,
         rank,
-        train_loader,
-        val_loader,
+        world_size,
     ):
+        train_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_train_config,
+            batch_size=self.batch_size,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
+        )
+
+        val_loader = HDF5Dataset.get_dataloader(
+            self.hdf5_dataset_val_config,
+            batch_size=self.batch_size,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
+        )
+
         model = self.launch_ddp_models(rank)
-        optimizer = self.optimizer(**self.optimizer_config)
-        criterion = self.criterion(**self.criterion_config)
+        optimizer, _, scheduler, wd_scheduler = adamw_warmup_consine_schd(
+            model=model,
+            iterations_per_epoch=len(train_loader),
+            start_lr=self.start_lr,
+            ref_lr=self.ref_lr,
+            warmup=self.warmup_epochs,
+            num_epochs=self.epochs,
+            final_lr=self.final_lr,
+            wd=self.wd,
+            final_wd=self.final_wd,
+        )
+        criterion = F.cross_entropy
         report_generator = ReportGenerator(
             save_path=self.save_path,
             main_device=self.main_device,
@@ -153,6 +168,7 @@ class DDPClassificationTrainer:
             params_to_save=self.params_to_save,
             best_metrics_obj=self.best_metrics_obj,
         )
+        report_generator.save_params(device=rank)
 
         for epoch in range(self.epochs):
             with tqdm(
@@ -162,7 +178,7 @@ class DDPClassificationTrainer:
             ) as bar:
                 report_generator.init_epoch_metrics_dict(
                     epoch=epoch,
-                    device=self.main_device,
+                    device=rank,
                 )
 
                 model.train()
@@ -170,16 +186,40 @@ class DDPClassificationTrainer:
                     data_batch = data_batch.to(rank)
                     label_batch = label_batch.to(rank)
 
+                    # 1. Zero grad
+                    optimizer.zero_grad()
+
+                    # 2. Fwd pass
                     model_out = model(data_batch)
+
+                    # 3. Compute loss
                     loss = criterion(model_out, label_batch)
 
+                    # 4. Backprop grad
                     loss.backward()
+
+                    # 5. Update model
                     optimizer.step()
-                    optimizer.zero_grad()
+
+                    # 6. Update learning rate
+                    lr = scheduler.step()
+
+                    # 7. Update weight decay
+                    wd = wd_scheduler.step()
 
                     report_generator.add_epoch_metric(
                         path="loss/train",
                         value=loss.item(),
+                        device=rank,
+                    )
+                    report_generator.add_epoch_metric(
+                        path="learning_rate",
+                        value=lr,
+                        device=rank,
+                    )
+                    report_generator.add_epoch_metric(
+                        path="weight_decay",
+                        value=wd,
                         device=rank,
                     )
                     bar.set_postfix(
@@ -245,29 +285,30 @@ class DDPClassificationTrainer:
     def test(
         self,
         load_path,
-        device=0,
+        rank=0,
+        world_size=1,
         metric="accuracy",
         n_thresholds=100,
     ):
         val_loader = HDF5Dataset.get_dataloader(
             self.hdf5_dataset_val_config,
             batch_size=self.batch_size,
-            num_workers=1,
-            world_size=1,
-            rank=device,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
         )
 
         test_loader = HDF5Dataset.get_dataloader(
             self.hdf5_dataset_test_config,
             batch_size=self.batch_size,
-            num_workers=1,
-            world_size=1,
-            rank=device,
+            num_workers=world_size,
+            world_size=world_size,
+            rank=rank,
         )
 
         # Load the model and its state
-        model = self.model(**self.model_config).to(device)
-        state_dict = torch.load(load_path, map_location=device)
+        model = self.model(**self.model_config).to(rank)
+        state_dict = torch.load(load_path, map_location=rank)
         model.load_state_dict(state_dict)
 
         # Evaluate model on validation set to find best threshold
@@ -280,8 +321,8 @@ class DDPClassificationTrainer:
                 total=len(test_loader), desc="Computing model output on val set"
             ) as bar:
                 for data_batch, label_batch in val_loader:
-                    data_batch = data_batch.to(device)
-                    label_batch = label_batch.to(device)
+                    data_batch = data_batch.to(rank)
+                    label_batch = label_batch.to(rank)
 
                     model_out = model(data_batch)
                     val_preds.append(model_out.cpu().numpy())
@@ -332,8 +373,8 @@ class DDPClassificationTrainer:
                 total=len(test_loader), desc="Computing model output on test set"
             ) as bar:
                 for data_batch, label_batch in test_loader:
-                    data_batch = data_batch.to(device)
-                    label_batch = label_batch.to(device)
+                    data_batch = data_batch.to(rank)
+                    label_batch = label_batch.to(rank)
 
                     model_out = model(data_batch)
                     test_preds.append(model_out.cpu().numpy())

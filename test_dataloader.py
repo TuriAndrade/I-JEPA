@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 
 def transform_data(data):
-    return torch.permute(data, (2, 0, 1)) / 255.0
+    return data / 255.0
 
 
 # Configuration for the dataset
@@ -25,13 +25,14 @@ def test_dataloader(rank, num_workers):
     # Get the DataLoader
     loader = HDF5Dataset.get_dataloader(
         dataset_config,
-        batch_size=256,  # You can adjust batch size as needed
+        batch_size=128,  # You can adjust batch size as needed
         num_workers=num_workers,
         rank=rank,  # Rank for the current process
-        world_size=4,  # Total number of GPUs
+        world_size=1,  # Total number of GPUs
         shuffle=True,
         drop_last=False,
         pin_memory=True,
+        data_frac=0.01,
     )
 
     # Print the total number of batches
@@ -44,8 +45,8 @@ def test_dataloader(rank, num_workers):
 
 
 if __name__ == "__main__":
-    num_workers = 4  # Number of workers for data loading
-    world_size = 4  # Total number of GPUs
+    num_workers = 1  # Number of workers for data loading
+    world_size = 1  # Total number of GPUs
 
     # Use torch.multiprocessing to spawn processes
     torch.multiprocessing.spawn(

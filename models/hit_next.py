@@ -8,7 +8,11 @@ from .utils import (
     does_conv2d_change_dim,
     to_tuple,
     compute_conv2d_output_resolution_from_module,
+    LayerNorm,
+    GRN,
 )
+from dataclasses import dataclass
+from typing import Optional, Union, Dict, Tuple
 
 
 class Mlp(nn.Module):
@@ -110,50 +114,6 @@ def window_reverse(
     )
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
-
-
-class LayerNorm(nn.Module):
-    r"""LayerNorm that supports two data formats: channels_last (default) or channels_first.
-    The ordering of the dimensions in the inputs. channels_last corresponds to inputs with
-    shape (batch_size, height, width, channels) while channels_first corresponds to inputs
-    with shape (batch_size, channels, height, width).
-    """
-
-    def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(normalized_shape))
-        self.bias = nn.Parameter(torch.zeros(normalized_shape))
-        self.eps = eps
-        self.data_format = data_format
-        if self.data_format not in ["channels_last", "channels_first"]:
-            raise NotImplementedError
-        self.normalized_shape = (normalized_shape,)
-
-    def forward(self, x):
-        if self.data_format == "channels_last":
-            return F.layer_norm(
-                x, self.normalized_shape, self.weight, self.bias, self.eps
-            )
-        elif self.data_format == "channels_first":
-            u = x.mean(1, keepdim=True)
-            s = (x - u).pow(2).mean(1, keepdim=True)
-            x = (x - u) / torch.sqrt(s + self.eps)
-            x = self.weight[:, None, None] * x + self.bias[:, None, None]
-            return x
-
-
-class GRN(nn.Module):
-    r"""GRN (Global Response Normalization) layer"""
-
-    def __init__(self, dim):
-        super().__init__()
-        self.gamma = nn.Parameter(torch.zeros(1, 1, 1, dim))
-        self.beta = nn.Parameter(torch.zeros(1, 1, 1, dim))
-
-    def forward(self, x):
-        Gx = torch.norm(x, p=2, dim=(1, 2), keepdim=True)
-        Nx = Gx / (Gx.mean(dim=-1, keepdim=True) + 1e-6)
-        return self.gamma * (x * Nx) + self.beta + x
 
 
 class CoPE1d(nn.Module):
@@ -898,7 +858,7 @@ class HiTNeXt(nn.Module):
         ape (bool): If True, add absolute position embedding to the patch embedding. Default: False
         rpe_type (str): combination of relative position enconding to use, separated by ';'. Eg. 'rpe_default; cope_1d'. Default: 'rpe_default'.
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
-        pretrained_window_size (tuple[int]): Pretrained window sizes of each layer.
+        pretrained_window_size (int | tuple[int]): Pretrained window sizes of each layer.
         apply_out_head (bool | None, optional): Whether to apply linear head to the output. Default: False
         out_head_dim (int | None): Out head dimension. Default: None
         patch_embed_config (dict): Patch Merging block config for patch embedding
@@ -907,7 +867,7 @@ class HiTNeXt(nn.Module):
 
     def __init__(
         self,
-        img_size=224,
+        img_size=256,
         in_chans=3,
         channels_last=False,
         n_stages=4,
@@ -1070,3 +1030,29 @@ class HiTNeXt(nn.Module):
             x = self.head(x)
 
         return x
+
+
+@dataclass
+class HiTNextConfig:
+    img_size: Union[int, Tuple[int]] = 256
+    in_chans: int = 3
+    channels_last: bool = False
+    n_stages: int = 4
+    embed_dim: Union[int, Tuple[int]] = (96, 192, 384, 768)
+    depths: Union[int, Tuple[int]] = (2, 2, 6, 2)
+    num_heads: Union[int, Tuple[int]] = (3, 6, 12, 24)
+    window_size: Union[int, Tuple[int]] = 7
+    mlp_ratio: Union[float, Tuple[float]] = 4.0
+    qkv_bias: Union[bool, Tuple[bool]] = True
+    drop_rate: Union[float, Tuple[float]] = 0.0
+    attn_drop_rate: Union[float, Tuple[float]] = 0.0
+    drop_path_rate: Union[float, Tuple[float]] = 0.1
+    norm_layer: LayerNorm = LayerNorm
+    ape: bool = False
+    rpe_type: str = "rpe_default"
+    use_checkpoint: bool = False
+    pretrained_window_size: Union[int, Tuple[int]] = 7
+    apply_out_head: Optional[bool] = False
+    out_head_dim: Optional[int] = None
+    patch_embed_config: Dict = {}
+    patch_merge_config: Union[Dict, Tuple[Dict]] = {}
