@@ -1,11 +1,13 @@
 import torch
-import yaml
+import json
+import pickle
 import os
 import numpy as np
 from .utils import (
     plot_report_metric,
     split_metric_path,
     build_metrics_dict,
+    CustomJSONEncoder,
 )
 
 
@@ -33,13 +35,13 @@ class ReportGenerator:
 
         os.makedirs(self.save_path, exist_ok=True)
 
-        self.save_models_path = os.path.join(self.save_path, "models")
-        os.makedirs(self.save_models_path, exist_ok=True)
+        self.save_model_ckpts_path = os.path.join(self.save_path, "model_ckpts")
+        os.makedirs(self.save_model_ckpts_path, exist_ok=True)
 
-        self.save_metrics_path = os.path.join(self.save_path, "metrics")
-        os.makedirs(self.save_metrics_path, exist_ok=True)
+        self.save_model_configs_path = os.path.join(self.save_path, "model_configs")
+        os.makedirs(self.save_model_configs_path, exist_ok=True)
 
-        self.save_plots_path = os.path.join(self.save_path, "plots")
+        self.save_plots_path = os.path.join(self.save_path, "train_plots")
         os.makedirs(self.save_plots_path, exist_ok=True)
 
         self.global_metrics_dict = build_metrics_dict(self.metrics)
@@ -102,8 +104,8 @@ class ReportGenerator:
             }
 
             # Save the dictionary to a JSON file
-            with open(os.path.join(self.save_path, "params.yaml"), "w") as f:
-                yaml.dump(params_dict, f, default_flow_style=False)
+            with open(os.path.join(self.save_path, "trainer_params.json"), "w") as f:
+                json.dump(params_dict, f, cls=CustomJSONEncoder, indent=4)
 
     def save_models(
         self,
@@ -112,8 +114,20 @@ class ReportGenerator:
     ):
         if (device is None) or (device == self.main_device):
             for name, model in models.items():
-                save_path = os.path.join(self.save_models_path, f"{name}.ckpt")
+                save_path = os.path.join(self.save_model_ckpts_path, f"{name}.pt")
                 torch.save(model.state_dict(), save_path)
+
+    def save_model_configs(
+        self,
+        model_configs,
+        device=None,
+    ):
+        if (device is None) or (device == self.main_device):
+            for name, config in model_configs.items():
+                save_path = os.path.join(self.save_model_configs_path, f"{name}.pkl")
+
+                with open(save_path, "wb") as f:
+                    pickle.dump(config, f)
 
     def save_best_models(
         self,
@@ -132,15 +146,15 @@ class ReportGenerator:
 
                     for name, model in models.items():
                         save_path = os.path.join(
-                            self.save_models_path,
-                            f"best_{metric_save_name}_{name}.ckpt",
+                            self.save_model_ckpts_path,
+                            f"best_{metric_save_name}_{name}.pt",
                         )
                         torch.save(model.state_dict(), save_path)
 
     def save_metrics(self, device=None):
         if (device is None) or (device == self.main_device):
-            with open(os.path.join(self.save_metrics_path, "metrics.yaml"), "w") as f:
-                yaml.dump(self.global_metrics_dict, f, default_flow_style=False)
+            with open(os.path.join(self.save_path, "train_metrics.json"), "w") as f:
+                json.dump(self.global_metrics_dict, f, cls=CustomJSONEncoder, indent=4)
 
     def save_plots(self, device=None):
         if (device is None) or (device == self.main_device):

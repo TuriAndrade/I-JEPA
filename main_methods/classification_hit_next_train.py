@@ -1,5 +1,5 @@
 from models import HiTNeXt, HiTNextConfig, LayerNorm
-from trainers.classification import DDPClassificationTrainer
+from trainers import DDPClassificationTrainer
 from dataloaders import norm_img
 from datetime import datetime
 
@@ -59,7 +59,6 @@ def main():
     #
     # Dataloader
     #
-
     train_dataset_config = {
         "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
         "group": "train",
@@ -70,13 +69,6 @@ def main():
     val_dataset_config = {
         "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
         "group": "val",
-        "data_dataset": "images",
-        "labels_dataset": "labels",
-        "data_transform": norm_img,
-    }
-    test_dataset_config = {
-        "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
-        "group": "test",
         "data_dataset": "images",
         "labels_dataset": "labels",
         "data_transform": norm_img,
@@ -93,18 +85,15 @@ def main():
         model_config=model_config.__dict__,
         model_name="hit_next",
         hdf5_dataset_train_config=train_dataset_config,
-        train_data_frac=0.001,
+        train_data_frac=0.1,
         hdf5_dataset_val_config=val_dataset_config,
-        val_data_frac=0.01,
-        hdf5_dataset_test_config=test_dataset_config,
-        test_data_frac=0.01,
+        val_data_frac=1.0,
         save_path=save_path,
         params_to_save=[
             "model_config",
             "model_name",
             "hdf5_dataset_train_config",
             "hdf5_dataset_val_config",
-            "hdf5_dataset_test_config",
             "batch_size",
             "epochs",
             "start_lr",
@@ -121,14 +110,14 @@ def main():
             "main_device",
         ],
         batch_size=32,
-        epochs=2,
+        epochs=100,
         seed=0,
         start_lr=5e-7,
         ref_lr=5e-4,
         final_lr=5e-6,
         wd=0.05,
         final_wd=0.5,
-        warmup_epochs=5,
+        warmup_epochs=20,
         ipe_scale=1.25,
         opt_config={},
         master_addr="localhost",
@@ -142,8 +131,3 @@ def main():
     # Train
     #
     trainer.spawn_train_ddp()
-
-    #
-    # Test
-    #
-    # trainer.test(n_thresholds=5)
