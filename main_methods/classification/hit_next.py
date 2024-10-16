@@ -1,7 +1,7 @@
 from models import HiTNeXt, HiTNextConfig, LayerNorm
 from trainers.classification import DDPClassificationTrainer
-from dataloaders import HDF5Dataset
-import torch
+from dataloaders import norm_img
+from datetime import datetime
 
 
 def main():
@@ -28,8 +28,8 @@ def main():
         rpe_type="rpe_default",
         use_checkpoint=False,
         pretrained_window_size=8,
-        apply_out_head=False,
-        out_head_dim=None,
+        apply_out_head=True,
+        out_head_dim=1000,
         patch_embed_config={
             "conv_config": {
                 "kernel_size": 4,
@@ -59,54 +59,91 @@ def main():
     #
     # Dataloader
     #
-    def transform_data(data):
-        return data / 255.0
 
     train_dataset_config = {
         "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
         "group": "train",
         "data_dataset": "images",
         "labels_dataset": "labels",
-        "data_transform": transform_data,
+        "data_transform": norm_img,
     }
     val_dataset_config = {
         "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
         "group": "val",
         "data_dataset": "images",
         "labels_dataset": "labels",
-        "data_transform": transform_data,
+        "data_transform": norm_img,
     }
     test_dataset_config = {
         "hdf5_file": "/home/ubuntu/JEPA_TCC/data/imagenet/imagenet_data.hdf5",
         "group": "test",
         "data_dataset": "images",
         "labels_dataset": "labels",
-        "data_transform": transform_data,
+        "data_transform": norm_img,
     }
 
     #
     # Trainer
     #
+    current_time = datetime.now()
+    formatted_time = current_time.strftime("%d-%m-%Y_%H:%M:%S")
+    save_path = f"/home/ubuntu/JEPA_TCC/train_output/{formatted_time}/"
     trainer = DDPClassificationTrainer(
         model=model,
         model_config=model_config.__dict__,
         model_name="hit_next",
         hdf5_dataset_train_config=train_dataset_config,
+        train_data_frac=0.001,
         hdf5_dataset_val_config=val_dataset_config,
+        val_data_frac=0.01,
         hdf5_dataset_test_config=test_dataset_config,
-        save_path="/home/ubuntu/JEPA_TCC/train_output/",
-        params_to_save=[""],
-        batch_size=128,
-        epochs=50,
+        test_data_frac=0.01,
+        save_path=save_path,
+        params_to_save=[
+            "model_config",
+            "model_name",
+            "hdf5_dataset_train_config",
+            "hdf5_dataset_val_config",
+            "hdf5_dataset_test_config",
+            "batch_size",
+            "epochs",
+            "start_lr",
+            "ref_lr",
+            "final_lr",
+            "wd",
+            "final_wd",
+            "warmup_epochs",
+            "ipe_scale",
+            "opt_config",
+            "master_addr",
+            "master_port",
+            "backend",
+            "main_device",
+        ],
+        batch_size=32,
+        epochs=2,
+        seed=0,
         start_lr=5e-7,
         ref_lr=5e-4,
         final_lr=5e-6,
         wd=0.05,
         final_wd=0.5,
         warmup_epochs=5,
+        ipe_scale=1.25,
+        opt_config={},
         master_addr="localhost",
         master_port="4321",
         backend="nccl",
         main_device=0,
-        process_timeout=10000,
+        process_timeout=None,
     )
+
+    #
+    # Train
+    #
+    trainer.spawn_train_ddp()
+
+    #
+    # Test
+    #
+    # trainer.test(n_thresholds=5)

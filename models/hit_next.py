@@ -11,7 +11,7 @@ from .utils import (
     LayerNorm,
     GRN,
 )
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union, Dict, Tuple
 
 
@@ -414,7 +414,11 @@ class WindowAttention(nn.Module):
                 )
             )
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
-        qkv = qkv.reshape(B_, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+        qkv = (
+            qkv.reshape(B_, N, 3, self.num_heads, -1)
+            .permute(2, 0, 3, 1, 4)
+            .contiguous()
+        )
         q, k, v = (
             qkv[0],
             qkv[1],
@@ -424,7 +428,8 @@ class WindowAttention(nn.Module):
         # cosine attention
         attn = F.normalize(q, dim=-1) @ F.normalize(k, dim=-1).transpose(-2, -1)
         logit_scale = torch.clamp(
-            self.logit_scale, max=torch.log(torch.tensor(1.0 / 0.01))
+            self.logit_scale,
+            max=torch.log(torch.tensor(1.0 / 0.01).to(self.logit_scale.device)),
         ).exp()
         attn = attn * logit_scale
 
@@ -699,7 +704,7 @@ class PatchMerging(nn.Module):
 
         # If channels_last is True, permute to False for conv
         if channels_last:
-            x = x.permute(0, 3, 1, 2)
+            x = x.permute(0, 3, 1, 2).contiguous()
 
         resid = x if self.resid else 0
 
@@ -709,13 +714,14 @@ class PatchMerging(nn.Module):
         if self.resid_after_first_block:
             resid = x
 
+        # Convert to channels_last
+        x = x.permute(0, 2, 3, 1).contiguous()
+        resid = resid.permute(0, 2, 3, 1).contiguous()
+
         if self.act_block is not None:
             x = self.act_block(x)
 
         x += resid
-
-        # Convert to channels_last
-        x = x.permute(0, 2, 3, 1)
 
         return x
 
@@ -1010,7 +1016,6 @@ class HiTNeXt(nn.Module):
         x = self.patch_embed(x, channels_last=self.channels_last)
         x = img_to_seq(x)
         # After patch embed, channels_last is always True
-
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
@@ -1054,5 +1059,5 @@ class HiTNextConfig:
     pretrained_window_size: Union[int, Tuple[int]] = 7
     apply_out_head: Optional[bool] = False
     out_head_dim: Optional[int] = None
-    patch_embed_config: Dict = {}
-    patch_merge_config: Union[Dict, Tuple[Dict]] = {}
+    patch_embed_config: Dict = field(default_factory=dict)
+    patch_merge_config: Union[Dict, Tuple[Dict]] = field(default_factory=dict)

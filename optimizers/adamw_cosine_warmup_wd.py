@@ -102,7 +102,7 @@ def check_keywords_in_name(name, keywords=()):
     return isin
 
 
-def adamw_warmup_consine_schd(
+def adamw_cosine_warmup_wd(
     model,
     iterations_per_epoch,
     start_lr,

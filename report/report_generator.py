@@ -1,8 +1,12 @@
 import torch
-import json
+import yaml
 import os
 import numpy as np
-from .utils import plot_report_metric, split_metric_path, build_metrics_dict
+from .utils import (
+    plot_report_metric,
+    split_metric_path,
+    build_metrics_dict,
+)
 
 
 class ReportGenerator:
@@ -23,6 +27,9 @@ class ReportGenerator:
         self.params_to_save = params_to_save
         self.best_metrics_obj = best_metrics_obj
         self.plot_args = plot_args
+
+        if self.params_to_save == "all":
+            self.params_to_save = list(self.trainer.__dict__.keys())
 
         os.makedirs(self.save_path, exist_ok=True)
 
@@ -89,9 +96,14 @@ class ReportGenerator:
         device=None,
     ):
         if (device is None) or (device == self.main_device):
-            with open(os.path.join(self.save_path, "params.txt"), "w+") as f:
-                for param in self.params_to_save:
-                    f.write(f"{param}: {self.trainer.__dict__[param]}\n")
+            # Create a dictionary of the parameters to save
+            params_dict = {
+                param: self.trainer.__dict__[param] for param in self.params_to_save
+            }
+
+            # Save the dictionary to a JSON file
+            with open(os.path.join(self.save_path, "params.yaml"), "w") as f:
+                yaml.dump(params_dict, f, default_flow_style=False)
 
     def save_models(
         self,
@@ -117,7 +129,7 @@ class ReportGenerator:
                 ):
                     self.best_metrics_value[path] = new_value
                     metric_save_name = path.replace("\\", "_").replace("/", "_")
-                    print(f"save_best_{path}_{new_value}")
+
                     for name, model in models.items():
                         save_path = os.path.join(
                             self.save_models_path,
@@ -127,8 +139,8 @@ class ReportGenerator:
 
     def save_metrics(self, device=None):
         if (device is None) or (device == self.main_device):
-            with open(os.path.join(self.save_metrics_path, "metrics.pkl"), "w+") as f:
-                json.dump(self.global_metrics_dict, f)
+            with open(os.path.join(self.save_metrics_path, "metrics.yaml"), "w") as f:
+                yaml.dump(self.global_metrics_dict, f, default_flow_style=False)
 
     def save_plots(self, device=None):
         if (device is None) or (device == self.main_device):

@@ -11,7 +11,7 @@ from sklearn.metrics import (
     f1_score,
     roc_auc_score,
 )
-from optimizers import adamw_warmup_consine_schd
+from optimizers import adamw_cosine_warmup_wd
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -27,10 +27,14 @@ class DDPClassificationTrainer:
         model_config,
         model_name,
         hdf5_dataset_train_config,
+        train_data_frac,
         hdf5_dataset_val_config,
+        val_data_frac,
         hdf5_dataset_test_config,
+        test_data_frac,
         save_path,
         params_to_save,
+        seed,
         batch_size,
         epochs,
         start_lr,
@@ -38,7 +42,9 @@ class DDPClassificationTrainer:
         final_lr,
         wd,
         final_wd,
+        ipe_scale,
         warmup_epochs,
+        opt_config,
         master_addr,
         master_port,
         backend,
@@ -49,18 +55,24 @@ class DDPClassificationTrainer:
         self.model_config = model_config
         self.model_name = model_name
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
+        self.train_data_frac = train_data_frac
         self.hdf5_dataset_val_config = hdf5_dataset_val_config
+        self.val_data_frac = val_data_frac
         self.hdf5_dataset_test_config = hdf5_dataset_test_config
+        self.test_data_frac = test_data_frac
         self.save_path = save_path
         self.params_to_save = params_to_save
+        self.seed = seed
+        self.batch_size = batch_size
         self.epochs = epochs
         self.start_lr = start_lr
         self.ref_lr = ref_lr
         self.final_lr = final_lr
         self.wd = wd
         self.final_wd = final_wd
+        self.ipe_scale = ipe_scale
         self.warmup_epochs = warmup_epochs
-        self.batch_size = batch_size
+        self.opt_config = opt_config
         self.master_addr = master_addr
         self.master_port = master_port
         self.backend = backend
@@ -77,6 +89,9 @@ class DDPClassificationTrainer:
             "loss/val": "min",
         }
 
+        # self.mp_manager = mp.Manager()
+        # self.best_models = self.mp_manager.dict()
+
         os.makedirs(self.save_path, exist_ok=True)
 
     def ddp_setup(self, rank, world_size):
@@ -85,7 +100,11 @@ class DDPClassificationTrainer:
             rank=rank,
             world_size=world_size,
             init_method=f"tcp://{self.master_addr}:{self.master_port}",
-            timeout=timedelta(seconds=self.process_timeout),
+            timeout=(
+                None
+                if not self.process_timeout
+                else timedelta(seconds=self.process_timeout)
+            ),
         )
 
     def ddp_cleanup(self):
@@ -120,6 +139,16 @@ class DDPClassificationTrainer:
         print(f"Master address: {self.master_addr}")
         print(f"Master port: {self.master_port}")
 
+        self.report_generator = ReportGenerator(
+            save_path=self.save_path,
+            main_device=self.main_device,
+            metrics=self.metrics,
+            trainer=self,
+            params_to_save=self.params_to_save,
+            best_metrics_obj=self.best_metrics_obj,
+        )
+        self.report_generator.save_params()
+
         mp.spawn(
             self.train_ddp,
             args=(world_size,),
@@ -137,6 +166,9 @@ class DDPClassificationTrainer:
             num_workers=world_size,
             world_size=world_size,
             rank=rank,
+            shuffle=True,
+            seed=self.seed,
+            data_frac=self.train_data_frac,
         )
 
         val_loader = HDF5Dataset.get_dataloader(
@@ -145,10 +177,13 @@ class DDPClassificationTrainer:
             num_workers=world_size,
             world_size=world_size,
             rank=rank,
+            shuffle=True,
+            seed=self.seed,
+            data_frac=self.val_data_frac,
         )
 
         model = self.launch_ddp_models(rank)
-        optimizer, _, scheduler, wd_scheduler = adamw_warmup_consine_schd(
+        optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
             model=model,
             iterations_per_epoch=len(train_loader),
             start_lr=self.start_lr,
@@ -158,17 +193,10 @@ class DDPClassificationTrainer:
             final_lr=self.final_lr,
             wd=self.wd,
             final_wd=self.final_wd,
+            ipe_scale=self.ipe_scale,
+            opt_config=self.opt_config,
         )
         criterion = F.cross_entropy
-        report_generator = ReportGenerator(
-            save_path=self.save_path,
-            main_device=self.main_device,
-            metrics=self.metrics,
-            trainer=self,
-            params_to_save=self.params_to_save,
-            best_metrics_obj=self.best_metrics_obj,
-        )
-        report_generator.save_params(device=rank)
 
         for epoch in range(self.epochs):
             with tqdm(
@@ -176,7 +204,7 @@ class DDPClassificationTrainer:
                 desc=f"Epoch {epoch+1}",
                 disable=(rank != self.main_device),
             ) as bar:
-                report_generator.init_epoch_metrics_dict(
+                self.report_generator.init_epoch_metrics_dict(
                     epoch=epoch,
                     device=rank,
                 )
@@ -207,27 +235,27 @@ class DDPClassificationTrainer:
                     # 7. Update weight decay
                     wd = wd_scheduler.step()
 
-                    report_generator.add_epoch_metric(
+                    self.report_generator.add_epoch_metric(
                         path="loss/train",
                         value=loss.item(),
                         device=rank,
                     )
-                    report_generator.add_epoch_metric(
+                    self.report_generator.add_epoch_metric(
                         path="learning_rate",
                         value=lr,
                         device=rank,
                     )
-                    report_generator.add_epoch_metric(
+                    self.report_generator.add_epoch_metric(
                         path="weight_decay",
                         value=wd,
                         device=rank,
                     )
                     bar.set_postfix(
                         {
-                            "train_loss": report_generator.get_last_epoch_metric(
+                            "train_loss": self.report_generator.get_last_epoch_metric(
                                 path="loss/train"
                             ),
-                            "val_loss": report_generator.get_last_epoch_metric(
+                            "val_loss": self.report_generator.get_last_epoch_metric(
                                 path="loss/val"
                             ),
                         }
@@ -243,35 +271,35 @@ class DDPClassificationTrainer:
                         model_out = model(data_batch)
                         loss = criterion(model_out, label_batch)
 
-                        report_generator.add_epoch_metric(
+                        self.report_generator.add_epoch_metric(
                             path="loss/val",
                             value=loss.item(),
                             device=rank,
                         )
                         bar.set_postfix(
                             {
-                                "train_loss": report_generator.get_last_epoch_metric(
+                                "train_loss": self.report_generator.get_last_epoch_metric(
                                     path="loss/train"
                                 ),
-                                "val_loss": report_generator.get_last_epoch_metric(
+                                "val_loss": self.report_generator.get_last_epoch_metric(
                                     path="loss/val"
                                 ),
                             }
                         )
                         bar.update(1)
 
-                report_generator.update_global_metrics(device=rank)
+                self.report_generator.update_global_metrics(device=rank)
 
-                report_generator.save_models(
+                self.report_generator.save_models(
                     models={f"last_{self.model_name}": model.module},
                     device=rank,
                 )
-                report_generator.save_best_models(
+                self.report_generator.save_best_models(
                     models={self.model_name: model.module},
                     device=rank,
                 )
-                report_generator.save_metrics(device=rank)
-                report_generator.save_plots(device=rank)
+                self.report_generator.save_metrics(device=rank)
+                self.report_generator.save_plots(device=rank)
 
     def compute_metrics(self, y_true, y_pred_proba, threshold):
         y_pred = (y_pred_proba >= threshold).astype(int)
@@ -296,6 +324,9 @@ class DDPClassificationTrainer:
             num_workers=world_size,
             world_size=world_size,
             rank=rank,
+            shuffle=True,
+            seed=self.seed,
+            data_frac=self.val_data_frac,
         )
 
         test_loader = HDF5Dataset.get_dataloader(
@@ -304,6 +335,9 @@ class DDPClassificationTrainer:
             num_workers=world_size,
             world_size=world_size,
             rank=rank,
+            shuffle=True,
+            seed=self.seed,
+            data_frac=self.test_data_frac,
         )
 
         # Load the model and its state
