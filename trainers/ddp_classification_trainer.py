@@ -277,11 +277,6 @@ class DDPClassificationTrainer:
                         bar.update(1)
 
                 self.report_generator.update_global_metrics(device=rank)
-
-                self.report_generator.save_models(
-                    models={f"last_{self.model_name}": model.module},
-                    device=rank,
-                )
                 self.report_generator.save_best_models(
                     models={self.model_name: model.module},
                     device=rank,

@@ -41,9 +41,11 @@ class ClassificationEvaluation:
         y_pred = np.argmax(y_pred_proba, axis=1)
 
         accuracy = accuracy_score(y_true, y_pred)
-        precision = precision_score(y_true, y_pred, average="weighted")
-        recall = recall_score(y_true, y_pred, average="weighted")
-        f1 = f1_score(y_true, y_pred, average="weighted")
+        precision = precision_score(
+            y_true, y_pred, average="weighted", zero_division=0.0
+        )
+        recall = recall_score(y_true, y_pred, average="weighted", zero_division=0.0)
+        f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0.0)
         auc = roc_auc_score(y_true, y_pred_proba, multi_class="ovr", average="weighted")
 
         return accuracy, precision, recall, f1, auc
