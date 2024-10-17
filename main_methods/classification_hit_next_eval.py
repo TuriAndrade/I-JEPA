@@ -35,7 +35,7 @@ def main(
         save_path=train_output_dir,
         hdf5_dataset_test_config=test_dataset_config,
         test_data_frac=1.0,
-        batch_size=32,
+        batch_size=16,
         seed=42,
     )
 
