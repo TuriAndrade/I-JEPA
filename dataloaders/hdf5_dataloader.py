@@ -38,9 +38,15 @@ class HDF5Dataset(Dataset):
             if not isinstance(self.data_transform, (list, tuple)):
                 self.data_transform = [self.data_transform]
 
+        else:
+            self.data_transform = []
+
         if self.labels_transform is not None:
             if not isinstance(self.labels_transform, (list, tuple)):
                 self.labels_transform = [self.labels_transform]
+
+        else:
+            self.labels_transform = []
 
         self.hdf = None  # Placeholder for opening the file
 
@@ -50,22 +56,19 @@ class HDF5Dataset(Dataset):
             data = torch.stack(data, dim=0)
             labels = torch.stack(labels, dim=0)
 
-            if self.data_transform is not None:
-                for f in self.data_transform:
-                    data = f(data)
+            for f in self.data_transform:
+                data = f(data)
 
-            if self.labels_transform is not None:
-                for f in self.labels_transform:
-                    labels = f(labels)
+            for f in self.labels_transform:
+                labels = f(labels)
 
             return data, labels
 
         def _collate_fn(batch):
             data = torch.stack(batch, dim=0)
 
-            if self.data_transform is not None:
-                for f in self.data_transform:
-                    data = f(data)
+            for f in self.data_transform:
+                data = f(data)
 
             return data
 
