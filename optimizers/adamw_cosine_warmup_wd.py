@@ -103,7 +103,7 @@ def check_keywords_in_name(name, keywords=()):
 
 
 def adamw_cosine_warmup_wd(
-    model,
+    models,
     iterations_per_epoch,
     start_lr,
     ref_lr,
@@ -117,14 +117,20 @@ def adamw_cosine_warmup_wd(
     opt_config={},
 ):
 
-    skip = {}
-    skip_keywords = {}
-    if hasattr(model, "no_weight_decay"):
-        skip = model.no_weight_decay()
-    if hasattr(model, "no_weight_decay_keywords"):
-        skip_keywords = model.no_weight_decay_keywords()
+    if not isinstance(models, (list, tuple)):
+        models = [models]
 
-    params = set_weight_decay(model, skip, skip_keywords)
+    params = []
+
+    for model in models:
+        skip = {}
+        skip_keywords = {}
+        if hasattr(model, "no_weight_decay"):
+            skip = model.no_weight_decay()
+        if hasattr(model, "no_weight_decay_keywords"):
+            skip_keywords = model.no_weight_decay_keywords()
+
+        params += set_weight_decay(model, skip, skip_keywords)
 
     optimizer = torch.optim.AdamW(params, **opt_config)
     scheduler = WarmupCosineSchedule(

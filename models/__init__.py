@@ -1,2 +1,2 @@
-from .hit_next import HiTNeXt, HiTNextConfig
-from .utils import LayerNorm, GRN
+from .vit import VisionTransformer, VisionTransformerPredictor
+from .utils import repeat_interleave_batch

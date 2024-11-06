@@ -1,1 +1,2 @@
 from .ddp_classification_trainer import DDPClassificationTrainer
+from .ddp_ijepa_trainer import DDPIJepaTrainer

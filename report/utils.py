@@ -5,7 +5,6 @@ import re
 import json
 import types
 import inspect
-import importlib
 
 
 def build_metrics_dict(metrics):

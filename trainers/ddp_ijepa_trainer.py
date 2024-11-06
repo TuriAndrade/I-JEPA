@@ -11,11 +11,15 @@ import torch.nn.functional as F
 import os
 
 
-class DDPClassificationTrainer:
+class DDPIJepaTrainer:
     def __init__(
         self,
-        model,
-        model_config,
+        encoder,
+        encoder_config,
+        predictor,
+        predictor_config,
+        mask_collator,
+        mask_collator_config,
         model_name,
         hdf5_dataset_train_config,
         train_data_frac,
@@ -40,8 +44,12 @@ class DDPClassificationTrainer:
         main_device,
         process_timeout,
     ):
-        self.model = model
-        self.model_config = model_config
+        self.encoder = encoder
+        self.encoder_config = encoder_config
+        self.predictor = predictor
+        self.predictor_config = predictor_config
+        self.mask_collator = mask_collator
+        self.mask_collator_config = mask_collator_config
         self.model_name = model_name
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.train_data_frac = train_data_frac
@@ -66,7 +74,9 @@ class DDPClassificationTrainer:
         self.main_device = main_device
         self.process_timeout = process_timeout
 
-        self.init_model = None
+        self.init_encoder = None
+        self.init_target = None
+        self.init_predictor = None
         self.metrics = {
             "loss": ["train", "val"],
             "learning_rate": ["learning_rate"],
@@ -95,13 +105,29 @@ class DDPClassificationTrainer:
         destroy_process_group()
 
     def init_models(self):
-        self.init_model = self.model(**self.model_config)
+        self.init_encoder = self.encoder(**self.encoder_config)
+        self.init_target = self.encoder(**self.encoder_config)
+        self.init_predictor = self.predictor(**self.predictor_config)
 
-    def launch_ddp_models(self, device):
-        model = self.model(**self.model_config).to(device)
-        model.load_state_dict(self.init_model.state_dict())
+    def launch_models(self, device, world_size):
+        encoder = self.encoder(**self.encoder_config).to(device)
+        encoder.load_state_dict(self.init_encoder.state_dict())
 
-        return DDP(model, device_ids=[device])
+        target = self.encoder(**self.encoder_config).to(device)
+        target.load_state_dict(self.init_target.state_dict())
+
+        predictor = self.predictor(**self.predictor_config).to(device)
+        predictor.load_state_dict(self.init_predictor.state_dict())
+
+        if world_size > 1:
+            return (
+                DDP(encoder, device_ids=[device]),
+                DDP(target, device_ids=[device]),
+                DDP(predictor, device_ids=[device]),
+            )
+
+        else:
+            return encoder, target, predictor
 
     def train_ddp(self, rank, world_size):
         self.ddp_setup(rank, world_size)
@@ -132,13 +158,40 @@ class DDPClassificationTrainer:
             best_metrics_obj=self.best_metrics_obj,
         )
         self.report_generator.save_params()
-        self.report_generator.save_model_configs({self.model_name: self.model_config})
+        self.report_generator.save_model_configs(
+            {
+                f"{self.model_name}_enc": self.encoder_config,
+                f"{self.model_name}_pred": self.predictor_config,
+            }
+        )
 
         mp.spawn(
             self.train_ddp,
             args=(world_size,),
             nprocs=world_size,
         )
+
+    def spawn_single_train(self):
+        self.init_models()
+
+        print("---- Initiating Single GPU training ----")
+        self.report_generator = ReportGenerator(
+            save_path=self.save_path,
+            main_device=self.main_device,
+            metrics=self.metrics,
+            trainer=self,
+            params_to_save=self.params_to_save,
+            best_metrics_obj=self.best_metrics_obj,
+        )
+        self.report_generator.save_params()
+        self.report_generator.save_model_configs(
+            {
+                f"{self.model_name}_enc": self.encoder_config,
+                f"{self.model_name}_pred": self.predictor_config,
+            }
+        )
+
+        self.train(rank=self.main_device, world_size=1)
 
     def train(
         self,
@@ -167,9 +220,10 @@ class DDPClassificationTrainer:
             data_frac=self.val_data_frac,
         )
 
-        model = self.launch_ddp_models(rank)
+        encoder, target, predictor = self.launch_models(rank, world_size)
+        mask_collator = self.mask_collator(**self.mask_collator_config)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
-            models=model,
+            models=[encoder, predictor],
             iterations_per_epoch=len(train_loader),
             start_lr=self.start_lr,
             ref_lr=self.ref_lr,
@@ -181,7 +235,7 @@ class DDPClassificationTrainer:
             ipe_scale=self.ipe_scale,
             opt_config=self.opt_config,
         )
-        criterion = F.cross_entropy
+        criterion = F.mse_loss
 
         for epoch in range(self.epochs):
             with tqdm(
@@ -194,19 +248,26 @@ class DDPClassificationTrainer:
                     device=rank,
                 )
 
-                model.train()
-                for data_batch, label_batch in train_loader:
+                encoder.train()
+                predictor.train()
+                for data_batch in train_loader:
+                    data_batch, masks_enc, masks_pred = mask_collator(data_batch)
                     data_batch = data_batch.to(rank)
-                    label_batch = label_batch.to(rank)
+                    masks_enc = [mask.to(rank) for mask in masks_enc]
+                    masks_pred = [mask.to(rank) for mask in masks_pred]
 
                     # 1. Zero grad
                     optimizer.zero_grad()
 
-                    # 2. Fwd pass
-                    model_out = model(data_batch)
+                    # 2.1 Fwd pass enc
+                    enc_out = encoder(data_batch, masks_enc)
+                    pred_out = predictor(enc_out, masks_enc, masks_pred)
+
+                    # 2.2 Fwd pass target (NO GRAD)
+                    tgt_out = target.forward_target(data_batch, masks_enc, masks_pred)
 
                     # 3. Compute loss
-                    loss = criterion(model_out, label_batch)
+                    loss = criterion(pred_out, tgt_out)
 
                     # 4. Backprop grad
                     loss.backward()
@@ -248,16 +309,25 @@ class DDPClassificationTrainer:
                     bar.update(1)
 
                 with torch.no_grad():
-                    model.eval()
-                    for data_batch, label_batch in val_loader:
+                    encoder.eval()
+                    predictor.eval()
+                    for data_batch in val_loader:
+                        data_batch, masks_enc, masks_pred = mask_collator(data_batch)
                         data_batch = data_batch.to(rank)
-                        label_batch = label_batch.to(rank)
+                        masks_enc = [mask.to(rank) for mask in masks_enc]
+                        masks_pred = [mask.to(rank) for mask in masks_pred]
 
-                        # 1. Fwd pass
-                        model_out = model(data_batch)
+                        # 1.1 Fwd pass target
+                        enc_out = encoder(data_batch, masks_enc)
+                        pred_out = predictor(enc_out, masks_enc, masks_pred)
+
+                        # 1.2 Fwd pass target
+                        tgt_out = target.forward_target(
+                            data_batch, masks_enc, masks_pred
+                        )
 
                         # 2. Compute loss
-                        loss = criterion(model_out, label_batch)
+                        loss = criterion(pred_out, tgt_out)
 
                         self.report_generator.add_epoch_metric(
                             path="loss/val",
@@ -278,7 +348,10 @@ class DDPClassificationTrainer:
 
                 self.report_generator.update_global_metrics(device=rank)
                 self.report_generator.save_best_models(
-                    models={self.model_name: model.module},
+                    models={
+                        f"{self.model_name}_enc": encoder.module,
+                        f"{self.model_name}_pred": predictor.module,
+                    },
                     device=rank,
                 )
                 self.report_generator.save_metrics(device=rank)
