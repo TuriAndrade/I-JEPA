@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 from .utils import trunc_normal_, repeat_interleave_batch
-from masks import apply_masks
+from mask_collators import apply_masks
 
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):

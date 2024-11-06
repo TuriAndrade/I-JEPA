@@ -29,6 +29,7 @@ class MBMaskCollator(object):
         npred=2,
         min_keep=4,
         allow_overlap=False,
+        data_transforms=[],
     ):
         super(MBMaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
@@ -47,6 +48,7 @@ class MBMaskCollator(object):
         self.allow_overlap = (
             allow_overlap  # whether to allow overlap b/w enc and pred masks
         )
+        self.data_transforms = data_transforms
         self._itr_counter = Value("i", -1)  # collator is shared across worker processes
 
     def step(self):
@@ -127,11 +129,11 @@ class MBMaskCollator(object):
         """
         B = len(batch)
 
-        if not isinstance(batch, torch.Tensor):
-            collated_batch = torch.utils.data.default_collate(batch)
+        collated_batch = torch.utils.data.default_collate(batch)
 
-        else:
-            collated_batch = batch
+        # Apply optional data transforms
+        for f in self.data_transforms:
+            collated_batch = f(collated_batch)
 
         seed = self.step()
         g = torch.Generator()

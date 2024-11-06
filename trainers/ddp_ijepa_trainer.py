@@ -207,6 +207,7 @@ class DDPIJepaTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.train_data_frac,
+            collate_fn=self.mask_collator(**self.mask_collator_config),
         )
 
         val_loader = HDF5Dataset.get_dataloader(
@@ -218,10 +219,10 @@ class DDPIJepaTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.val_data_frac,
+            collate_fn=self.mask_collator(**self.mask_collator_config),
         )
 
         encoder, target, predictor = self.launch_models(rank, world_size)
-        mask_collator = self.mask_collator(**self.mask_collator_config)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
             models=[encoder, predictor],
             iterations_per_epoch=len(train_loader),
@@ -250,8 +251,7 @@ class DDPIJepaTrainer:
 
                 encoder.train()
                 predictor.train()
-                for data_batch in train_loader:
-                    data_batch, masks_enc, masks_pred = mask_collator(data_batch)
+                for data_batch, masks_enc, masks_pred in train_loader:
                     data_batch = data_batch.to(rank)
                     masks_enc = [mask.to(rank) for mask in masks_enc]
                     masks_pred = [mask.to(rank) for mask in masks_pred]
@@ -311,8 +311,7 @@ class DDPIJepaTrainer:
                 with torch.no_grad():
                     encoder.eval()
                     predictor.eval()
-                    for data_batch in val_loader:
-                        data_batch, masks_enc, masks_pred = mask_collator(data_batch)
+                    for data_batch, masks_enc, masks_pred in val_loader:
                         data_batch = data_batch.to(rank)
                         masks_enc = [mask.to(rank) for mask in masks_enc]
                         masks_pred = [mask.to(rank) for mask in masks_pred]

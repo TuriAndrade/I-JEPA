@@ -2,7 +2,7 @@ from models import VisionTransformer, VisionTransformerPredictor
 from trainers import DDPIJepaTrainer
 from torch import nn
 from functools import partial
-from masks import MBMaskCollator
+from mask_collators import MBMaskCollator
 from dataloaders import norm_img, img_channels_first
 
 
@@ -67,6 +67,7 @@ def main():
         "npred": 2,
         "min_keep": 4,
         "allow_overlap": False,
+        "data_transforms": [norm_img, img_channels_first],
     }
 
     #
@@ -77,14 +78,12 @@ def main():
         "group": "train",
         "data_dataset": "images",
         "labels_dataset": None,
-        "data_transform": [norm_img, img_channels_first],
     }
     val_dataset_config = {
         "hdf5_file": "/home/turi/aulas/TCC/data/cifar-10-python/cifar10.hdf5",
         "group": "val",
         "data_dataset": "images",
         "labels_dataset": None,
-        "data_transform": [norm_img, img_channels_first],
     }
 
     #
