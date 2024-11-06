@@ -48,13 +48,19 @@ class HDF5Dataset(Dataset):
         else:
             self.labels_transform = []
 
-        self.hdf = None  # Placeholder for opening the file
+        self.hdf = h5py.File(self.hdf5_file, "r", swmr=True)
+        self.data = self.hdf[os.path.join(self.group, self.data_dataset)]
+        self.labels = (
+            self.hdf[os.path.join(self.group, self.labels_dataset)]
+            if self.labels_dataset is not None
+            else None
+        )
 
     def get_collate_fn(self):
         def _collate_fn_w_labels(batch):
             data, labels = zip(*batch)
-            data = torch.stack(data, dim=0)
-            labels = torch.stack(labels, dim=0)
+            data = torch.tensor(np.array(data), dtype=self.data_dtype)
+            labels = torch.tensor(np.array(labels), dtype=self.labels_dtype)
 
             for f in self.data_transform:
                 data = f(data)
@@ -65,7 +71,7 @@ class HDF5Dataset(Dataset):
             return data, labels
 
         def _collate_fn(batch):
-            data = torch.stack(batch, dim=0)
+            data = torch.tensor(np.array(batch), dtype=self.data_dtype)
 
             for f in self.data_transform:
                 data = f(data)
@@ -74,40 +80,15 @@ class HDF5Dataset(Dataset):
 
         return _collate_fn if self.labels_dataset is None else _collate_fn_w_labels
 
-    def __enter__(self):
-        self.hdf = h5py.File(self.hdf5_file, "r", swmr=True)
-        self.data = self.hdf[os.path.join(self.group, self.data_dataset)]
-        self.labels = (
-            self.hdf[os.path.join(self.group, self.labels_dataset)]
-            if self.labels_dataset is not None
-            else None
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        if self.hdf is not None:
-            self.hdf.close()
-
     def __len__(self):
         with h5py.File(self.hdf5_file, "r") as f:
             return len(f[os.path.join(self.group, self.data_dataset)])
 
     def __getitem__(self, idx):
-        if self.hdf is None:
-            self.hdf = h5py.File(self.hdf5_file, "r", swmr=True)
-            self.data = self.hdf[os.path.join(self.group, self.data_dataset)]
-            self.labels = (
-                self.hdf[os.path.join(self.group, self.labels_dataset)]
-                if self.labels_dataset is not None
-                else None
-            )
-
         data = self.data[idx]
-        data = torch.tensor(data, dtype=self.data_dtype)
 
         if self.labels is not None:
             label = self.labels[idx]
-            label = torch.tensor(label, dtype=self.labels_dtype)
 
             return data, label
         else:
