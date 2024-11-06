@@ -18,8 +18,8 @@ class DDPIJepaTrainer:
         encoder_config,
         predictor,
         predictor_config,
-        mask_collator,
-        mask_collator_config,
+        batch_collator,
+        batch_collator_config,
         model_name,
         hdf5_dataset_train_config,
         train_data_frac,
@@ -48,8 +48,8 @@ class DDPIJepaTrainer:
         self.encoder_config = encoder_config
         self.predictor = predictor
         self.predictor_config = predictor_config
-        self.mask_collator = mask_collator
-        self.mask_collator_config = mask_collator_config
+        self.batch_collator = batch_collator
+        self.batch_collator_config = batch_collator_config
         self.model_name = model_name
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.train_data_frac = train_data_frac
@@ -207,7 +207,11 @@ class DDPIJepaTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.train_data_frac,
-            collate_fn=self.mask_collator(**self.mask_collator_config),
+            collate_fn=(
+                self.batch_collator(**self.batch_collator_config)
+                if self.batch_collator
+                else None
+            ),
         )
 
         val_loader = HDF5Dataset.get_dataloader(
@@ -219,7 +223,11 @@ class DDPIJepaTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.val_data_frac,
-            collate_fn=self.mask_collator(**self.mask_collator_config),
+            collate_fn=(
+                self.batch_collator(**self.batch_collator_config)
+                if self.batch_collator
+                else None
+            ),
         )
 
         encoder, target, predictor = self.launch_models(rank, world_size)

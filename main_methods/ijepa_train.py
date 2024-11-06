@@ -2,8 +2,7 @@ from models import VisionTransformer, VisionTransformerPredictor
 from trainers import DDPIJepaTrainer
 from torch import nn
 from functools import partial
-from mask_collators import MBMaskCollator
-from dataloaders import norm_img, img_channels_first
+from batch_collators import MBMaskCollator, norm_img, img_channels_first
 
 
 def main():
@@ -56,8 +55,8 @@ def main():
     #
     # Masks
     #
-    mask_collator = MBMaskCollator
-    mask_collator_config = {
+    batch_collator = MBMaskCollator
+    batch_collator_config = {
         "input_size": (img_size, img_size),
         "patch_size": patch_size,
         "enc_mask_scale": (0.2, 0.8),
@@ -94,8 +93,8 @@ def main():
         "encoder_config": encoder_config,
         "predictor": predictor,
         "predictor_config": predictor_config,
-        "mask_collator": mask_collator,
-        "mask_collator_config": mask_collator_config,
+        "batch_collator": batch_collator,
+        "batch_collator_config": batch_collator_config,
         "model_name": "cifar_ijepa",
         "hdf5_dataset_train_config": train_dataset_config,
         "train_data_frac": 0.05,

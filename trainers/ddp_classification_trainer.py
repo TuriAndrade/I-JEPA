@@ -16,6 +16,8 @@ class DDPClassificationTrainer:
         self,
         model,
         model_config,
+        batch_collator,
+        batch_collator_config,
         model_name,
         hdf5_dataset_train_config,
         train_data_frac,
@@ -42,6 +44,8 @@ class DDPClassificationTrainer:
     ):
         self.model = model
         self.model_config = model_config
+        self.batch_collator = batch_collator
+        self.batch_collator_config = batch_collator_config
         self.model_name = model_name
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.train_data_frac = train_data_frac
@@ -97,11 +101,15 @@ class DDPClassificationTrainer:
     def init_models(self):
         self.init_model = self.model(**self.model_config)
 
-    def launch_ddp_models(self, device):
+    def launch_models(self, device, world_size):
         model = self.model(**self.model_config).to(device)
         model.load_state_dict(self.init_model.state_dict())
 
-        return DDP(model, device_ids=[device])
+        if world_size > 1:
+            return DDP(model, device_ids=[device])
+
+        else:
+            return model
 
     def train_ddp(self, rank, world_size):
         self.ddp_setup(rank, world_size)
@@ -154,6 +162,11 @@ class DDPClassificationTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.train_data_frac,
+            collate_fn=(
+                self.batch_collator(**self.batch_collator_config)
+                if self.batch_collator
+                else None
+            ),
         )
 
         val_loader = HDF5Dataset.get_dataloader(
@@ -165,9 +178,14 @@ class DDPClassificationTrainer:
             shuffle=True,
             seed=self.seed,
             data_frac=self.val_data_frac,
+            collate_fn=(
+                self.batch_collator(**self.batch_collator_config)
+                if self.batch_collator
+                else None
+            ),
         )
 
-        model = self.launch_ddp_models(rank)
+        model = self.launch_models(rank, world_size)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
             models=model,
             iterations_per_epoch=len(train_loader),
