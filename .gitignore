@@ -1,11 +1,8 @@
 # Datasets
 data/
 
-# Virtual env
-JEPA_VENV/
-
-# Training reports
-train_output/
+# Training and evaluation reports
+output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

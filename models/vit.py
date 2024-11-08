@@ -514,18 +514,6 @@ class VisionTransformer(nn.Module):
 
         return x
 
-    def forward_target(self, x, masks_enc, masks_pred):
-        with torch.no_grad():
-            tgt = self.forward(x)
-            tgt = F.layer_norm(tgt, (tgt.size(-1),))
-            B = len(tgt)
-
-            # -- create targets (masked regions of tgt) --
-            tgt = apply_masks(tgt, masks_pred)
-            tgt = repeat_interleave_batch(tgt, B, repeat=len(masks_enc))
-
-            return tgt
-
     def interpolate_pos_encoding(self, x, pos_embed):
         npatch = x.shape[1] - 1
         N = pos_embed.shape[1] - 1

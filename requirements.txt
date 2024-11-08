@@ -8,3 +8,4 @@ tqdm
 matplotlib
 seaborn
 scikit-learn
+python-dotenv

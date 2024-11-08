@@ -77,4 +77,4 @@ def main():
     )
     trainer = DDPIJepaTrainer(**trainer_config)
 
-    trainer.spawn_single_train()
+    trainer.spawn_train_ddp()

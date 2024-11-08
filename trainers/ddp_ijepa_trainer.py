@@ -5,6 +5,7 @@ from dataloaders import HDF5Dataset
 from report import ReportGenerator
 from tqdm import tqdm
 from optimizers import adamw_cosine_warmup_wd
+from models import apply_masks, repeat_interleave_batch
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -36,6 +37,7 @@ class DDPIJepaTrainer:
         wd,
         final_wd,
         ipe_scale,
+        ema,
         warmup_epochs,
         opt_config,
         master_addr,
@@ -66,6 +68,7 @@ class DDPIJepaTrainer:
         self.wd = wd
         self.final_wd = final_wd
         self.ipe_scale = ipe_scale
+        self.ema = ema
         self.warmup_epochs = warmup_epochs
         self.opt_config = opt_config
         self.master_addr = master_addr
@@ -193,6 +196,18 @@ class DDPIJepaTrainer:
 
         self.train(rank=self.main_device, world_size=1)
 
+    def _forward_target(self, target, x, masks_enc, masks_pred):
+        with torch.no_grad():
+            tgt = target(x)
+            tgt = F.layer_norm(tgt, (tgt.size(-1),))
+            B = len(tgt)
+
+            # -- create targets (masked regions of tgt) --
+            tgt = apply_masks(tgt, masks_pred)
+            tgt = repeat_interleave_batch(tgt, B, repeat=len(masks_enc))
+
+            return tgt
+
     def train(
         self,
         rank,
@@ -231,9 +246,10 @@ class DDPIJepaTrainer:
         )
 
         encoder, target, predictor = self.launch_models(rank, world_size)
+        ipe = len(train_loader)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
             models=[encoder, predictor],
-            iterations_per_epoch=len(train_loader),
+            iterations_per_epoch=ipe,
             start_lr=self.start_lr,
             ref_lr=self.ref_lr,
             warmup=self.warmup_epochs,
@@ -245,6 +261,11 @@ class DDPIJepaTrainer:
             opt_config=self.opt_config,
         )
         criterion = F.mse_loss
+        momentum_scheduler = (
+            self.ema[0]
+            + i * (self.ema[1] - self.ema[0]) / (ipe * self.epochs * self.ipe_scale)
+            for i in range(int(ipe * self.epochs * self.ipe_scale) + 1)
+        )
 
         for epoch in range(self.epochs):
             with tqdm(
@@ -272,15 +293,17 @@ class DDPIJepaTrainer:
                     pred_out = predictor(enc_out, masks_enc, masks_pred)
 
                     # 2.2 Fwd pass target (NO GRAD)
-                    tgt_out = target.forward_target(data_batch, masks_enc, masks_pred)
+                    tgt_out = self._forward_target(
+                        target, data_batch, masks_enc, masks_pred
+                    )
 
                     # 3. Compute loss
                     loss = criterion(pred_out, tgt_out)
 
-                    # 4. Backprop grad
+                    # 4. Compute gradients
                     loss.backward()
 
-                    # 5. Update model
+                    # 5. Update encoder weights
                     optimizer.step()
 
                     # 6. Update learning rate
@@ -288,6 +311,14 @@ class DDPIJepaTrainer:
 
                     # 7. Update weight decay
                     wd = wd_scheduler.step()
+
+                    # 8. Update target weights
+                    with torch.no_grad():
+                        m = next(momentum_scheduler)
+                        for param_q, param_k in zip(
+                            encoder.parameters(), target.parameters()
+                        ):
+                            param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
                     self.report_generator.add_epoch_metric(
                         path="loss/train",
@@ -329,8 +360,8 @@ class DDPIJepaTrainer:
                         pred_out = predictor(enc_out, masks_enc, masks_pred)
 
                         # 1.2 Fwd pass target
-                        tgt_out = target.forward_target(
-                            data_batch, masks_enc, masks_pred
+                        tgt_out = self._forward_target(
+                            target, data_batch, masks_enc, masks_pred
                         )
 
                         # 2. Compute loss

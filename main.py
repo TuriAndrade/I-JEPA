@@ -1,9 +1,3 @@
-import sys
-from main_methods import (
-    module_dict,
-)  # Import the dictionary containing your module functions
-
-
 def parse_args_to_dict(args):
     """Convert list of arguments to a dictionary, allowing multiple values for the same key."""
     kwargs = {}
@@ -41,12 +35,31 @@ def parse_args_to_dict(args):
 
 
 def main():
+    import sys
+
     # Get command-line arguments
     args = sys.argv[1:]  # Skip the script name
 
-    if not args:
-        print("Error: No arguments provided.")
-        exit(1)
+    # Check for the env argument
+    if "-e" in args or "--env" in args:
+        dotenv_index = args.index("-e") if "-e" in args else args.index("--env")
+        dotenv_path = args[dotenv_index + 1]  # The next argument is the env path
+
+        # Remove the env path and its argument from args
+        args.pop(dotenv_index)  # Remove '-e' or '--env'
+        args.pop(dotenv_index)  # Remove the env path itself
+
+    else:
+        dotenv_path = "./.env"
+
+    # Load env
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=dotenv_path)
+
+    from main_methods import (
+        module_dict,
+    )  # Import the dictionary containing your module functions
 
     # Check for the required module key argument
     if "-m" not in args and "--module-key" not in args:

@@ -1,19 +1,6 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 import math
-
 from multiprocessing import Value
-
-from logging import getLogger
-
 import torch
-
-logger = getLogger()
 
 
 class MBMaskCollator(object):
@@ -30,10 +17,13 @@ class MBMaskCollator(object):
         min_keep=4,
         allow_overlap=False,
         data_transforms=[],
+        max_total_tries=1000,  # Added parameter for maximum total tries
     ):
         super(MBMaskCollator, self).__init__()
+
         if not isinstance(input_size, tuple):
             input_size = (input_size,) * 2
+
         self.patch_size = patch_size
         self.height, self.width = (
             input_size[0] // patch_size,
@@ -50,6 +40,7 @@ class MBMaskCollator(object):
         )
         self.data_transforms = data_transforms
         self._itr_counter = Value("i", -1)  # collator is shared across worker processes
+        self.max_total_tries = max_total_tries  # Set maximum total tries
 
     def step(self):
         i = self._itr_counter
@@ -87,11 +78,13 @@ class MBMaskCollator(object):
                 mask *= acceptable_regions[k]
 
         # --
-        # -- Loop to sample masks until we find a valid one
+        # -- Loop to sample masks until we find a valid one or reach max_total_tries
         tries = 0
         timeout = og_timeout = 20
         valid_mask = False
-        while not valid_mask:
+        total_tries = 0
+
+        while not valid_mask and total_tries < self.max_total_tries:
             # -- Sample block top-left corner
             top = torch.randint(0, self.height - h, (1,))
             left = torch.randint(0, self.width - w, (1,))
@@ -101,16 +94,18 @@ class MBMaskCollator(object):
             if acceptable_regions is not None:
                 constrain_mask(mask, tries)
             mask = torch.nonzero(mask.flatten())
-            # -- If mask too small try again
+            # -- If mask too small, try again
             valid_mask = len(mask) > self.min_keep
             if not valid_mask:
                 timeout -= 1
+                total_tries += 1
                 if timeout == 0:
                     tries += 1
                     timeout = og_timeout
-                    logger.warning(
-                        f'Mask generator says: "Valid mask not found, decreasing acceptable-regions [{tries}]"'
-                    )
+
+        if not valid_mask:
+            raise RuntimeError("Could not generate a valid mask.")
+
         mask = mask.squeeze()
         # --
         mask_complement = torch.ones((self.height, self.width), dtype=torch.int32)
@@ -161,11 +156,8 @@ class MBMaskCollator(object):
             collated_masks_pred.append(masks_p)
 
             acceptable_regions = masks_C
-            try:
-                if self.allow_overlap:
-                    acceptable_regions = None
-            except Exception as e:
-                logger.warning(f"Encountered exception in mask-generator {e}")
+            if self.allow_overlap:
+                acceptable_regions = None
 
             masks_e = []
             for _ in range(self.nenc):
