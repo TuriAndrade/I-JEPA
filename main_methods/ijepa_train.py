@@ -14,7 +14,7 @@ def main():
     #
     # Dataset
     #
-    dataset_config = dataloaders_config.imagenet1k_config()
+    dataset_config = dataloaders_config.imagenet100_config()
     path, img_size, patch_size = (
         dataset_config["path"],
         dataset_config["img_size"],
@@ -63,15 +63,16 @@ def main():
         predictor=predictor,
         predictor_config=predictor_config,
         batch_collator=batch_collator,
+        model_name="ijepa",
         batch_collator_config=batch_collator_config,
         hdf5_dataset_train_config=hdf5_dataset_train_config,
-        train_data_frac=0.1,
+        train_data_frac=1,
         hdf5_dataset_val_config=hdf5_dataset_val_config,
-        val_data_frac=0.1,
+        val_data_frac=1,
         batch_size=128,
         epochs=300,
         warmup_epochs=40,
-        save_path=os.path.join(os.environ.get("output_dir"), "ijepa", "imagenet10%"),
+        save_path=os.path.join(os.environ.get("output_dir"), "ijepa", "imagenet100"),
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),
     )

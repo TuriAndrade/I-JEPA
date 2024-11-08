@@ -9,6 +9,14 @@ def imagenet1k_config():
     }
 
 
+def imagenet100_config():
+    return {
+        "path": os.environ.get("imagenet100_path"),
+        "img_size": 224,
+        "default_patch_size": 16,
+    }
+
+
 def cifar10_config():
     return {
         "path": os.environ.get("cifar10_path"),
