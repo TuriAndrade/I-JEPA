@@ -168,15 +168,18 @@ class ReportGenerator:
                         )
                         torch.save(model.state_dict(), save_path)
 
-    def save_local_best_models(self, models, device=None):
+    def save_local_best_models(self, models, window=1, device=None):
         if (device is None) or (device == self.main_device):
             for path, value in self.best_metrics_obj.items():
                 default = np.inf if value == "min" else -np.inf
                 last = self.get_global_metric(path, -1, default)
-                sec_to_last = self.get_global_metric(path, -2, default)
+                prev = [
+                    self.get_global_metric(path, -i, default)
+                    for i in range(2, window + 2)
+                ]
 
-                if ((value == "min") and (last < sec_to_last)) or (
-                    (value == "max") and (last > sec_to_last)
+                if ((value == "min") and (last < min(prev))) or (
+                    (value == "max") and (last > max(prev))
                 ):
                     self.local_best_models[path] = deepcopy(models)
                     self.should_save_local_best[path] = True

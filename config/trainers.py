@@ -34,6 +34,7 @@ def default_ijepa_trainer(
         "val_data_frac": val_data_frac,
         "save_path": save_path,
         "params_to_save": "all",
+        "local_best_window": 5,
         "seed": 42,
         "batch_size": batch_size,
         "epochs": epochs,

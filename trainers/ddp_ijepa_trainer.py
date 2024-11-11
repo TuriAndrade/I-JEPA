@@ -28,6 +28,7 @@ class DDPIJepaTrainer:
         val_data_frac,
         save_path,
         params_to_save,
+        local_best_window,
         seed,
         batch_size,
         epochs,
@@ -59,6 +60,7 @@ class DDPIJepaTrainer:
         self.val_data_frac = val_data_frac
         self.save_path = save_path
         self.params_to_save = params_to_save
+        self.local_best_window = local_best_window
         self.seed = seed
         self.batch_size = batch_size
         self.epochs = epochs
@@ -390,6 +392,7 @@ class DDPIJepaTrainer:
                         f"{self.model_name}_enc": encoder.module,
                         f"{self.model_name}_pred": predictor.module,
                     },
+                    window=self.local_best_window,
                     device=rank,
                 )
                 self.report_generator.save_metrics(device=rank)
