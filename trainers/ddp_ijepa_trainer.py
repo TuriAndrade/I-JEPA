@@ -385,7 +385,7 @@ class DDPIJepaTrainer:
                         bar.update(1)
 
                 self.report_generator.update_global_metrics(device=rank)
-                self.report_generator.save_best_models(
+                self.report_generator.save_local_best_models(
                     models={
                         f"{self.model_name}_enc": encoder.module,
                         f"{self.model_name}_pred": predictor.module,

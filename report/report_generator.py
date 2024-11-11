@@ -3,6 +3,7 @@ import json
 import pickle
 import os
 import numpy as np
+from copy import deepcopy
 from .utils import (
     plot_report_metric,
     split_metric_path,
@@ -53,6 +54,12 @@ class ReportGenerator:
             for path in self.best_metrics_obj.keys()
         }
 
+        self.local_best_models = {path: None for path in self.best_metrics_obj.keys()}
+        self.local_best_epoch = {path: -1 for path in self.best_metrics_obj.keys()}
+        self.should_save_local_best = {
+            path: False for path in self.best_metrics_obj.keys()
+        }
+
     def init_epoch_metrics_dict(self, epoch, device=None):
         if (device is None) or (device == self.main_device):
             if epoch > self.current_epoch:
@@ -60,23 +67,33 @@ class ReportGenerator:
                 self.current_epoch += 1
                 self.epoch_metrics_dict = build_metrics_dict(self.metrics)
 
-    def get_last_global_metric(self, path):
+    def get_global_metric(self, path, idx, default=np.nan):
         key, graph, line = split_metric_path(path, 3)
 
-        return (
-            self.global_metrics_dict[key][graph][line][-1]
-            if len(self.global_metrics_dict[key][graph][line]) > 0
-            else np.nan
-        )
+        if ((idx >= 0) and (len(self.global_metrics_dict[key][graph][line]) > idx)) or (
+            (idx < 0) and (len(self.global_metrics_dict[key][graph][line]) >= (-idx))
+        ):
+            return self.global_metrics_dict[key][graph][line][idx]
+
+        else:
+            return default
+
+    def get_last_global_metric(self, path):
+        return self.get_global_metric(path, -1)
+
+    def get_epoch_metric(self, path, idx, default=np.nan):
+        key, graph, line = split_metric_path(path, 3)
+
+        if ((idx >= 0) and (len(self.epoch_metrics_dict[key][graph][line]) > idx)) or (
+            (idx < 0) and (len(self.epoch_metrics_dict[key][graph][line]) >= (-idx))
+        ):
+            return self.epoch_metrics_dict[key][graph][line][idx]
+
+        else:
+            return default
 
     def get_last_epoch_metric(self, path):
-        key, graph, line = split_metric_path(path, 3)
-
-        return (
-            self.epoch_metrics_dict[key][graph][line][-1]
-            if len(self.epoch_metrics_dict[key][graph][line]) > 0
-            else np.nan
-        )
+        return self.get_epoch_metric(path, -1)
 
     def add_epoch_metric(self, path, value, device=None):
         key, graph, line = split_metric_path(path, 3)
@@ -150,6 +167,32 @@ class ReportGenerator:
                             f"best_{metric_save_name}_{name}.pt",
                         )
                         torch.save(model.state_dict(), save_path)
+
+    def save_local_best_models(self, models, device=None):
+        if (device is None) or (device == self.main_device):
+            for path, value in self.best_metrics_obj.items():
+                default = np.inf if value == "min" else -np.inf
+                last = self.get_global_metric(path, -1, default)
+                sec_to_last = self.get_global_metric(path, -2, default)
+
+                if ((value == "min") and (last < sec_to_last)) or (
+                    (value == "max") and (last > sec_to_last)
+                ):
+                    self.local_best_models[path] = deepcopy(models)
+                    self.should_save_local_best[path] = True
+                    self.local_best_epoch[path] = self.current_epoch
+
+                elif self.should_save_local_best[path]:
+                    metric_save_name = path.replace("\\", "_").replace("/", "_")
+
+                    for name, model in self.local_best_models[path].items():
+                        save_path = os.path.join(
+                            self.save_model_ckpts_path,
+                            f"local_best_epoch_{self.local_best_epoch[path]}_{metric_save_name}_{name}.pt",
+                        )
+                        torch.save(model.state_dict(), save_path)
+
+                    self.should_save_local_best[path] = False
 
     def save_metrics(self, device=None):
         if (device is None) or (device == self.main_device):
