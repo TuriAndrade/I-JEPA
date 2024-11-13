@@ -14,7 +14,10 @@ def main(
     load_pretrained_path=None,
     save_path=None,
     dataset_name="imagenet_100",
+    model_name="vit_tiny",
     data_frac=1,
+    epochs=30,
+    warmup_epochs=5,
 ):
     #
     # Dataset
@@ -35,7 +38,11 @@ def main(
     if save_path is None:
         save_path = os.path.join(
             os.environ.get("output_dir"),
-            "vit_clf" if load_pretrained_path is None else "vit_clf_pretrained",
+            (
+                f"clf_{model_name}"
+                if load_pretrained_path is None
+                else f"pretrained_clf_{model_name}"
+            ),
             dataset_name,
         )
 
@@ -43,8 +50,8 @@ def main(
     # Model
     #
     model = VisionTransformer
-    model_config = models_config.get_dataset_vit_config(
-        dataset_name=dataset_name,
+    model_config = models_config.get_model_config(
+        model_name=model_name,
         img_size=img_size,
         patch_size=patch_size,
         out_dim=n_classes,
@@ -54,7 +61,9 @@ def main(
     # Batch collator
     #
     batch_collator = SupervisedCollator
-    batch_collator_config = batch_collators_config.default_classification_collator()
+    batch_collator_config = batch_collators_config.get_collator_config(
+        collator_name="default_classification_collator"
+    )
 
     #
     # Trainer
@@ -71,8 +80,8 @@ def main(
         hdf5_dataset_val_config=hdf5_dataset_val_config,
         val_data_frac=data_frac,
         batch_size=128,
-        epochs=50,
-        warmup_epochs=5,
+        epochs=epochs,
+        warmup_epochs=warmup_epochs,
         save_path=save_path,
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),

@@ -14,6 +14,8 @@ def main(
     model_config_path,
     save_path=None,
     dataset_name="imagenet_100",
+    model_name="vit_tiny",
+    pretrained=False,
 ):
     #
     # Dataset
@@ -34,7 +36,7 @@ def main(
     if save_path is None:
         save_path = os.path.join(
             os.environ.get("output_dir"),
-            "vit_clf_pretrained" if "pretrained" in model_config_path else "vit_clf",
+            f"clf_{model_name}" if not pretrained else f"pretrained_clf_{model_name}",
             dataset_name,
         )
 
@@ -47,7 +49,9 @@ def main(
     # Batch collator
     #
     batch_collator = SupervisedCollator
-    batch_collator_config = batch_collators_config.default_classification_collator()
+    batch_collator_config = batch_collators_config.get_collator_config(
+        collator_name="default_classification_collator"
+    )
 
     #
     # Eval
@@ -62,6 +66,8 @@ def main(
         hdf5_dataset_test_config=hdf5_dataset_test_config,
         batch_size=128,
         seed=42,
+        n_bootstraps=1000,
+        confidence_level=95,
     )
     evaluator = ClassificationEvaluation(**evaluator_config)
     evaluator.test()

@@ -29,6 +29,8 @@ class ClassificationEvaluation:
         test_data_frac,
         batch_size,
         seed,
+        n_bootstraps,
+        confidence_level,
     ):
         self.model = model
         self.model_ckpt_path = model_ckpt_path
@@ -40,6 +42,8 @@ class ClassificationEvaluation:
         self.batch_size = batch_size
         self.seed = seed
         self.test_data_frac = test_data_frac
+        self.n_bootstraps = n_bootstraps
+        self.confidence_level = confidence_level
 
     def compute_metrics(self, y_true, y_pred_proba):
         y_pred = np.argmax(y_pred_proba, axis=1)
@@ -104,22 +108,84 @@ class ClassificationEvaluation:
         test_labels = np.concatenate(test_labels)
         test_preds = np.concatenate(test_preds)
 
-        accuracy, precision, recall, f1, auc = self.compute_metrics(
-            test_labels,
-            test_preds,
-        )
+        # Perform bootstrapping
+        rng = np.random.RandomState(self.seed)
 
-        print(f"Test Metrics:")
-        print(f"Accuracy: {accuracy:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-        print(f"F1 Score: {f1:.4f}")
-        print(f"AUC: {auc:.4f}")
+        bootstrapped_metrics = {
+            "accuracy": [],
+            "precision": [],
+            "recall": [],
+            "f1": [],
+            "auc": [],
+        }
+
+        for _ in tqdm(range(self.n_bootstraps), desc="Bootstrapping metrics"):
+            # Sample with replacement
+            indices = rng.choice(len(test_labels), len(test_labels), replace=True)
+            y_true_boot = test_labels[indices]
+            y_pred_proba_boot = test_preds[indices]
+
+            # Compute metrics
+            accuracy, precision, recall, f1, auc = self.compute_metrics(
+                y_true_boot,
+                y_pred_proba_boot,
+            )
+            # Append to lists
+            bootstrapped_metrics["accuracy"].append(accuracy)
+            bootstrapped_metrics["precision"].append(precision)
+            bootstrapped_metrics["recall"].append(recall)
+            bootstrapped_metrics["f1"].append(f1)
+            bootstrapped_metrics["auc"].append(auc)
+
+        # Now compute mean and confidence intervals for each metric
+        alpha = 100 - self.confidence_level
+
+        metrics_summary = {}
+        for metric in bootstrapped_metrics:
+            scores = np.array(bootstrapped_metrics[metric])
+            mean = np.mean(scores)
+            lower = np.percentile(scores, alpha / 2)
+            upper = np.percentile(scores, 100 - alpha / 2)
+            metrics_summary[metric] = {
+                "mean": mean,
+                "lower_ci": lower,
+                "upper_ci": upper,
+            }
+
+        # Print the results
+        print(f"Test Metrics with {self.confidence_level}% confidence intervals:")
+        for metric in metrics_summary:
+            mean = metrics_summary[metric]["mean"]
+            lower = metrics_summary[metric]["lower_ci"]
+            upper = metrics_summary[metric]["upper_ci"]
+            print(
+                f"{metric.capitalize()}: {mean:.4f} (95% CI: {lower:.4f} - {upper:.4f})"
+            )
 
         # Save metrics to a CSV file
         metrics_dict = {
             "Metric": ["Accuracy", "Precision", "Recall", "F1 Score", "AUC"],
-            "Value": [accuracy, precision, recall, f1, auc],
+            "Mean": [
+                metrics_summary["accuracy"]["mean"],
+                metrics_summary["precision"]["mean"],
+                metrics_summary["recall"]["mean"],
+                metrics_summary["f1"]["mean"],
+                metrics_summary["auc"]["mean"],
+            ],
+            "Lower CI": [
+                metrics_summary["accuracy"]["lower_ci"],
+                metrics_summary["precision"]["lower_ci"],
+                metrics_summary["recall"]["lower_ci"],
+                metrics_summary["f1"]["lower_ci"],
+                metrics_summary["auc"]["lower_ci"],
+            ],
+            "Upper CI": [
+                metrics_summary["accuracy"]["upper_ci"],
+                metrics_summary["precision"]["upper_ci"],
+                metrics_summary["recall"]["upper_ci"],
+                metrics_summary["f1"]["upper_ci"],
+                metrics_summary["auc"]["upper_ci"],
+            ],
         }
 
         metrics_df = pd.DataFrame(metrics_dict)
@@ -131,7 +197,7 @@ class ClassificationEvaluation:
         with open(model_info_path, "w") as f:
             json.dump(
                 {
-                    "model": self.model,
+                    "model": str(self.model),
                     "model_ckpt_path": self.model_ckpt_path,
                     "model_config_path": self.model_config_path,
                 },

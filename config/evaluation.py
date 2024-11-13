@@ -12,6 +12,8 @@ def default_classification_evaluation(
     save_path=os.path.join(os.environ.get("output_dir"), "clf_eval"),
     batch_size=128,
     seed=42,
+    n_bootstraps=1000,
+    confidence_level=95,
 ):
     return {
         "model": model,
@@ -24,4 +26,6 @@ def default_classification_evaluation(
         "save_path": save_path,
         "batch_size": batch_size,
         "seed": seed,
+        "n_bootstraps": n_bootstraps,
+        "confidence_level": confidence_level,
     }

@@ -10,7 +10,14 @@ from config import (
 import os
 
 
-def main(save_path=None, dataset_name="imagenet_100"):
+def main(
+    save_path=None,
+    dataset_name="imagenet_100",
+    encoder_name="vit_tiny",
+    predictor_name="vit_predictor_tiny",
+    epochs=150,
+    warmup_epochs=20,
+):
     #
     # Dataset
     #
@@ -27,14 +34,16 @@ def main(save_path=None, dataset_name="imagenet_100"):
         )
     )
     if save_path is None:
-        save_path = os.path.join(os.environ.get("output_dir"), "ijepa", dataset_name)
+        save_path = os.path.join(
+            os.environ.get("output_dir"), f"ijepa_{encoder_name}", dataset_name
+        )
 
     #
     # Encoder
     #
     encoder = VisionTransformer
-    encoder_config = models_config.get_dataset_vit_config(
-        dataset_name=dataset_name,
+    encoder_config = models_config.get_model_config(
+        model_name=encoder_name,
         img_size=img_size,
         patch_size=patch_size,
     )
@@ -43,8 +52,8 @@ def main(save_path=None, dataset_name="imagenet_100"):
     # Predictor
     #
     predictor = VisionTransformerPredictor
-    predictor_config = models_config.get_dataset_vit_predictor_config(
-        dataset_name=dataset_name,
+    predictor_config = models_config.get_model_config(
+        model_name=predictor_name,
         img_size=img_size,
         patch_size=patch_size,
     )
@@ -53,7 +62,8 @@ def main(save_path=None, dataset_name="imagenet_100"):
     # Masks
     #
     batch_collator = MBMaskCollator
-    batch_collator_config = batch_collators_config.default_ijepa_multiblock_collator(
+    batch_collator_config = batch_collators_config.get_collator_config(
+        collator_name="default_ijepa_multiblock_collator",
         img_size=img_size,
         patch_size=patch_size,
     )
@@ -74,8 +84,8 @@ def main(save_path=None, dataset_name="imagenet_100"):
         hdf5_dataset_val_config=hdf5_dataset_val_config,
         val_data_frac=1,
         batch_size=128,
-        epochs=150,
-        warmup_epochs=20,
+        epochs=epochs,
+        warmup_epochs=warmup_epochs,
         save_path=save_path,
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),

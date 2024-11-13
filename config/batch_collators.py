@@ -21,3 +21,15 @@ def default_ijepa_multiblock_collator(
 
 def default_classification_collator():
     return {"data_transforms": [norm_img, img_channels_first]}
+
+
+collator_configs = {
+    "default_ijepa_multiblock_collator": default_ijepa_multiblock_collator,
+    "default_classification_collator": default_classification_collator,
+}
+
+
+def get_collator_config(collator_name, *args, **kwargs):
+    assert collator_name in collator_configs, "Invalid collator name."
+
+    return collator_configs[collator_name](*args, **kwargs)
