@@ -191,7 +191,7 @@ class ReportGenerator:
                     for name, model in self.local_best_models[path].items():
                         save_path = os.path.join(
                             self.save_model_ckpts_path,
-                            f"local_best_epoch_{self.local_best_epoch[path]}_{metric_save_name}_{name}.pt",
+                            f"local_best_epoch_{self.local_best_epoch[path] + 1}_{metric_save_name}_{name}.pt",
                         )
                         torch.save(model.state_dict(), save_path)
 

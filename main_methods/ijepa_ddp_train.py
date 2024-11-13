@@ -15,8 +15,8 @@ def main(
     dataset_name="imagenet_100",
     encoder_name="vit_tiny",
     predictor_name="vit_predictor_tiny",
-    epochs=150,
-    warmup_epochs=20,
+    epochs=300,
+    warmup_epochs=40,
 ):
     #
     # Dataset
@@ -84,6 +84,8 @@ def main(
         hdf5_dataset_val_config=hdf5_dataset_val_config,
         val_data_frac=1,
         batch_size=128,
+        save_ckpt_interval=10,
+        save_predictor=False,
         epochs=epochs,
         warmup_epochs=warmup_epochs,
         save_path=save_path,

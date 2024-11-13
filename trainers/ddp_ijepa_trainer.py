@@ -40,6 +40,8 @@ class DDPIJepaTrainer:
         ipe_scale,
         ema,
         warmup_epochs,
+        save_ckpt_interval,
+        save_predictor,
         opt_config,
         master_addr,
         master_port,
@@ -72,6 +74,8 @@ class DDPIJepaTrainer:
         self.ipe_scale = ipe_scale
         self.ema = ema
         self.warmup_epochs = warmup_epochs
+        self.save_ckpt_interval = save_ckpt_interval
+        self.save_predictor = save_predictor
         self.opt_config = opt_config
         self.master_addr = master_addr
         self.master_port = master_port
@@ -387,13 +391,20 @@ class DDPIJepaTrainer:
                         bar.update(1)
 
                 self.report_generator.update_global_metrics(device=rank)
-                self.report_generator.save_local_best_models(
-                    models={
-                        f"{self.model_name}_enc": encoder.module,
-                        f"{self.model_name}_pred": predictor.module,
-                    },
-                    window=self.local_best_window,
-                    device=rank,
-                )
                 self.report_generator.save_metrics(device=rank)
                 self.report_generator.save_plots(device=rank)
+
+                if (epoch + 1) % self.save_ckpt_interval == 0:
+                    self.report_generator.save_models(
+                        models=(
+                            {
+                                f"{self.model_name}_enc_epoch_{epoch + 1}": encoder.module,
+                                f"{self.model_name}_pred_epoch_{epoch + 1}": predictor.module,
+                            }
+                            if self.save_predictor
+                            else {
+                                f"{self.model_name}_enc_epoch_{epoch + 1}": encoder.module
+                            }
+                        ),
+                        device=rank,
+                    )

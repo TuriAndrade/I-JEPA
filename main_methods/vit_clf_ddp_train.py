@@ -16,8 +16,8 @@ def main(
     dataset_name="imagenet_100",
     model_name="vit_tiny",
     data_frac=1,
-    epochs=30,
-    warmup_epochs=5,
+    epochs=20,
+    warmup_epochs=3,
 ):
     #
     # Dataset
