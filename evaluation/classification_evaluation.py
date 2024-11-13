@@ -22,6 +22,8 @@ class ClassificationEvaluation:
         model,
         model_ckpt_path,
         model_config_path,
+        batch_collator,
+        batch_collator_config,
         save_path,
         hdf5_dataset_test_config,
         test_data_frac,
@@ -31,6 +33,8 @@ class ClassificationEvaluation:
         self.model = model
         self.model_ckpt_path = model_ckpt_path
         self.model_config_path = model_config_path
+        self.batch_collator = batch_collator
+        self.batch_collator_config = batch_collator_config
         self.save_path = save_path
         self.hdf5_dataset_test_config = hdf5_dataset_test_config
         self.batch_size = batch_size
@@ -63,6 +67,11 @@ class ClassificationEvaluation:
             shuffle=True,
             seed=self.seed,
             data_frac=self.test_data_frac,
+            collate_fn=(
+                self.batch_collator(**self.batch_collator_config)
+                if self.batch_collator
+                else None
+            ),
         )
 
         # Load the model and its state

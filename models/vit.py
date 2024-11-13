@@ -418,11 +418,13 @@ class VisionTransformer(nn.Module):
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
         init_std=0.02,
+        out_dim=None,
         **kwargs
     ):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
         self.num_heads = num_heads
+        self.out_dim = out_dim
         # --
         self.patch_embed = PatchEmbed(
             img_size=img_size[0],
@@ -462,6 +464,11 @@ class VisionTransformer(nn.Module):
             ]
         )
         self.norm = norm_layer(embed_dim)
+
+        if out_dim is not None:
+            self.cls_head = nn.Linear(embed_dim, out_dim)
+        else:
+            self.cls_head = None
         # ------
         self.init_std = init_std
         self.apply(self._init_weights)
@@ -511,6 +518,10 @@ class VisionTransformer(nn.Module):
 
         if self.norm is not None:
             x = self.norm(x)
+
+        if self.cls_head is not None:
+            x = x.mean(dim=1)  # Global average pooling
+            x = self.cls_head(x)
 
         return x
 

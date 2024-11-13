@@ -19,6 +19,7 @@ class DDPClassificationTrainer:
         batch_collator,
         batch_collator_config,
         model_name,
+        load_pretrained_path,
         hdf5_dataset_train_config,
         train_data_frac,
         hdf5_dataset_val_config,
@@ -47,6 +48,7 @@ class DDPClassificationTrainer:
         self.batch_collator = batch_collator
         self.batch_collator_config = batch_collator_config
         self.model_name = model_name
+        self.load_pretrained_path = load_pretrained_path
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.train_data_frac = train_data_frac
         self.hdf5_dataset_val_config = hdf5_dataset_val_config
@@ -101,6 +103,15 @@ class DDPClassificationTrainer:
     def init_models(self):
         self.init_model = self.model(**self.model_config)
 
+        if self.load_pretrained_path is not None:
+            self.init_model.load_state_dict(
+                torch.load(
+                    self.load_pretrained_path,
+                    weights_only=True,
+                ),
+                strict=False,
+            )
+
     def launch_models(self, device, world_size):
         model = self.model(**self.model_config).to(device)
         model.load_state_dict(self.init_model.state_dict())
@@ -147,6 +158,23 @@ class DDPClassificationTrainer:
             args=(world_size,),
             nprocs=world_size,
         )
+
+    def spawn_single_train(self):
+        self.init_models()
+
+        print("---- Initiating Single GPU training ----")
+        self.report_generator = ReportGenerator(
+            save_path=self.save_path,
+            main_device=self.main_device,
+            metrics=self.metrics,
+            trainer=self,
+            params_to_save=self.params_to_save,
+            best_metrics_obj=self.best_metrics_obj,
+        )
+        self.report_generator.save_params()
+        self.report_generator.save_model_configs({self.model_name: self.model_config})
+
+        self.train(rank=self.main_device, world_size=1)
 
     def train(
         self,

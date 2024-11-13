@@ -6,6 +6,7 @@ def imagenet1k_config():
         "path": os.environ.get("imagenet1k_path"),
         "img_size": 224,
         "default_patch_size": 16,
+        "n_classes": 1000,
     }
 
 
@@ -14,6 +15,7 @@ def imagenet100_config():
         "path": os.environ.get("imagenet100_path"),
         "img_size": 224,
         "default_patch_size": 16,
+        "n_classes": 100,
     }
 
 
@@ -22,7 +24,21 @@ def cifar10_config():
         "path": os.environ.get("cifar10_path"),
         "img_size": 32,
         "default_patch_size": 2,
+        "n_classes": 10,
     }
+
+
+dataset_configs = {
+    "imagenet_1k": imagenet1k_config,
+    "imagenet_100": imagenet100_config,
+    "cifar_10": cifar10_config,
+}
+
+
+def get_dataset_config(dataset_name="imagenet_1k", *args, **kwargs):
+    assert dataset_name in dataset_configs, "Invalid dataset."
+
+    return dataset_configs[dataset_name](*args, **kwargs)
 
 
 def hdf5_dataset(

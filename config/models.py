@@ -2,7 +2,7 @@ import torch.nn as nn
 from functools import partial
 
 
-def vit_predictor(
+def vit_predictor_tiny(
     img_size=224,
     patch_size=16,
 ):
@@ -26,6 +26,7 @@ def vit_predictor(
 def vit_tiny(
     img_size=224,
     patch_size=16,
+    out_dim=None,
 ):
     return {
         "img_size": [img_size],
@@ -34,7 +35,7 @@ def vit_tiny(
         "embed_dim": 192,
         "predictor_embed_dim": 384,
         "depth": 12,
-        "predictor_depth": 12,
+        "predictor_depth": 6,
         "num_heads": 6,
         "mlp_ratio": 4.0,
         "qkv_bias": True,
@@ -44,4 +45,27 @@ def vit_tiny(
         "drop_path_rate": 0.0,
         "norm_layer": nn.LayerNorm,
         "init_std": 0.02,
+        "out_dim": out_dim,
     }
+
+
+dataset_vit_configs = {
+    "imagenet_100": vit_tiny,
+}
+
+
+def get_dataset_vit_config(dataset_name, *args, **kwargs):
+    assert dataset_name in dataset_vit_configs, "Invalid dataset."
+
+    return dataset_vit_configs[dataset_name](*args, **kwargs)
+
+
+dataset_vit_pred_configs = {
+    "imagenet_100": vit_predictor_tiny,
+}
+
+
+def get_dataset_vit_predictor_config(dataset_name, *args, **kwargs):
+    assert dataset_name in dataset_vit_configs, "Invalid dataset."
+
+    return dataset_vit_pred_configs[dataset_name](*args, **kwargs)

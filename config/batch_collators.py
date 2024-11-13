@@ -17,3 +17,7 @@ def default_ijepa_multiblock_collator(
         "allow_overlap": False,
         "data_transforms": [norm_img, img_channels_first],
     }
+
+
+def default_classification_collator():
+    return {"data_transforms": [norm_img, img_channels_first]}
