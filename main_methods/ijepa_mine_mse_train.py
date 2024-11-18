@@ -1,9 +1,9 @@
 from models import (
     VisionTransformer,
-    VisionTransformerCrossPredictor,
-    VisionTransformerPredictor,
+    MutualInformationPredictor,
+    MutualInformationCrossPredictor,
 )
-from trainers import DDPIJepaTrainer
+from trainers import DDPIJepaMINEMSETrainer
 from batch_collators import MBMaskCollator
 from config import (
     batch_collator_config,
@@ -18,10 +18,10 @@ def main(
     save_path=None,
     dataset_name="imagenet_100",
     encoder_name="vit_tiny",
-    predictor_name="vit_predictor_tiny",
+    predictor_name="mutual_information_predictor_tiny",
     epochs=300,
     warmup_epochs=40,
-    use_spectral_norm=False,
+    use_spectral_norm=True,
     cross_attn=False,
 ):
     #
@@ -41,7 +41,7 @@ def main(
     )
     if save_path is None:
         save_path = os.path.join(
-            os.environ.get("output_dir"), f"ijepa_{encoder_name}", dataset_name
+            os.environ.get("output_dir"), f"ijepa_mine_{encoder_name}", dataset_name
         )
 
     #
@@ -59,15 +59,17 @@ def main(
     # Predictor
     #
     predictor = (
-        VisionTransformerCrossPredictor
+        MutualInformationCrossPredictor
         if bool(cross_attn)
-        else VisionTransformerPredictor
+        else MutualInformationPredictor
     )
     predictor_cfg = model_config.get_model_config(
         model_name=predictor_name,
         img_size=img_size,
         patch_size=patch_size,
         use_spectral_norm=bool(use_spectral_norm),
+        mse_factor=0,
+        mi_factor=1,
     )
 
     #
@@ -78,18 +80,20 @@ def main(
         collator_name="default_ijepa_multiblock_collator",
         img_size=img_size,
         patch_size=patch_size,
+        n_enc=1,
+        n_pred=4,
     )
 
     #
     # Trainer
     #
-    trainer_cfg = trainer_config.default_ijepa_trainer(
+    trainer_cfg = trainer_config.default_ijepa_mine_trainer(
         encoder=encoder,
         encoder_config=encoder_cfg,
         predictor=predictor,
         predictor_config=predictor_cfg,
         batch_collator=batch_collator,
-        model_name="ijepa",
+        model_name="ijepa_mine",
         batch_collator_config=batch_collator_cfg,
         hdf5_dataset_train_config=hdf5_dataset_train_cfg,
         train_data_frac=1,
@@ -104,6 +108,6 @@ def main(
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),
     )
-    trainer = DDPIJepaTrainer(**trainer_cfg)
+    trainer = DDPIJepaMINEMSETrainer(**trainer_cfg)
 
     trainer.spawn_single_train()

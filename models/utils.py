@@ -7,6 +7,12 @@
 
 import torch
 import math
+import numpy as np
+
+import torch
+import torch.nn as nn
+
+from torch.nn.utils import spectral_norm
 
 
 def apply_masks(x, masks):
@@ -67,3 +73,402 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0):
     # type: (Tensor, float, float, float, float) -> Tensor
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+
+
+def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
+    """
+    grid_size: int of the grid height and width
+    return:
+    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    """
+    grid_h = np.arange(grid_size, dtype=float)
+    grid_w = np.arange(grid_size, dtype=float)
+    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+    grid = np.stack(grid, axis=0)
+
+    grid = grid.reshape([2, 1, grid_size, grid_size])
+    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+    if cls_token:
+        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+    return pos_embed
+
+
+def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
+    assert embed_dim % 2 == 0
+
+    # use half of dimensions to encode grid_h
+    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
+    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
+
+    emb = np.concatenate([emb_h, emb_w], axis=1)  # (H*W, D)
+    return emb
+
+
+def get_1d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
+    """
+    grid_size: int of the grid length
+    return:
+    pos_embed: [grid_size, embed_dim] or [1+grid_size, embed_dim] (w/ or w/o cls_token)
+    """
+    grid = np.arange(grid_size, dtype=float)
+    pos_embed = get_1d_sincos_pos_embed_from_grid(embed_dim, grid)
+    if cls_token:
+        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+    return pos_embed
+
+
+def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
+    """
+    embed_dim: output dimension for each position
+    pos: a list of positions to be encoded: size (M,)
+    out: (M, D)
+    """
+    assert embed_dim % 2 == 0
+    omega = np.arange(embed_dim // 2, dtype=float)
+    omega /= embed_dim / 2.0
+    omega = 1.0 / 10000**omega  # (D/2,)
+
+    pos = pos.reshape(-1)  # (M,)
+    out = np.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
+
+    emb_sin = np.sin(out)  # (M, D/2)
+    emb_cos = np.cos(out)  # (M, D/2)
+
+    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+    return emb
+
+
+def drop_path(x, drop_prob: float = 0.0, training: bool = False):
+    if drop_prob == 0.0 or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+    random_tensor.floor_()  # binarize
+    output = x.div(keep_prob) * random_tensor
+    return output
+
+
+class DropPath(nn.Module):
+    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
+
+    def __init__(self, drop_prob=None):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x):
+        return drop_path(x, self.drop_prob, self.training)
+
+
+class MLP(nn.Module):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.GELU,
+        drop=0.0,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        fc1 = nn.Linear(in_features, hidden_features)
+        fc2 = nn.Linear(hidden_features, out_features)
+        if use_spectral_norm:
+            fc1 = spectral_norm(fc1)
+            fc2 = spectral_norm(fc2)
+        self.fc1 = fc1
+        self.act = act_layer()
+        self.fc2 = fc2
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class Attention(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        proj = nn.Linear(dim, dim)
+        if use_spectral_norm:
+            qkv = spectral_norm(qkv)
+            proj = spectral_norm(proj)
+        self.qkv = qkv
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = proj
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, attn
+
+
+class Block(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        mlp_ratio=4.0,
+        qkv_bias=False,
+        qk_scale=None,
+        drop=0.0,
+        attn_drop=0.0,
+        drop_path=0.0,
+        act_layer=nn.GELU,
+        norm_layer=nn.LayerNorm,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = Attention(
+            dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=attn_drop,
+            proj_drop=drop,
+            use_spectral_norm=use_spectral_norm,
+        )
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = MLP(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+            use_spectral_norm=use_spectral_norm,
+        )
+
+    def forward(self, x, return_attention=False):
+        y, attn = self.attn(self.norm1(x))
+        if return_attention:
+            return attn
+        x = x + self.drop_path(y)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class CrossAttention(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.q_proj = nn.Linear(dim, dim, bias=qkv_bias)
+        self.k_proj = nn.Linear(dim, dim, bias=qkv_bias)
+        self.v_proj = nn.Linear(dim, dim, bias=qkv_bias)
+
+        if use_spectral_norm:
+            self.q_proj = spectral_norm(self.q_proj)
+            self.k_proj = spectral_norm(self.k_proj)
+            self.v_proj = spectral_norm(self.v_proj)
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        if use_spectral_norm:
+            self.proj = spectral_norm(self.proj)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, ctx, tgt):
+        B, N_ctx, C = ctx.shape
+        B, N_tgt, C = tgt.shape
+
+        # Compute queries from tgt
+        q = self.q_proj(tgt).reshape(B, N_tgt, self.num_heads, C // self.num_heads)
+        q = q.permute(0, 2, 1, 3)  # (B, num_heads, N_tgt, head_dim)
+
+        # Compute keys and values from ctx
+        k = self.k_proj(ctx).reshape(B, N_ctx, self.num_heads, C // self.num_heads)
+        k = k.permute(0, 2, 1, 3)  # (B, num_heads, N_ctx, head_dim)
+
+        v = self.v_proj(ctx).reshape(B, N_ctx, self.num_heads, C // self.num_heads)
+        v = v.permute(0, 2, 1, 3)  # (B, num_heads, N_ctx, head_dim)
+
+        # Compute attention
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, N_tgt, N_ctx)
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        # Apply attention to values
+        x = attn @ v  # (B, num_heads, N_tgt, head_dim)
+        x = x.transpose(1, 2).reshape(B, N_tgt, C)  # (B, N_tgt, C)
+
+        # Final projection
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, attn
+
+
+class CrossBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        mlp_ratio=4.0,
+        qkv_bias=False,
+        qk_scale=None,
+        drop=0.0,
+        attn_drop=0.0,
+        drop_path=0.0,
+        act_layer=nn.GELU,
+        norm_layer=nn.LayerNorm,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        self.norm1_tgt = norm_layer(dim)
+        self.norm1_ctx = norm_layer(dim)
+        self.attn = CrossAttention(
+            dim=dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=attn_drop,
+            proj_drop=drop,
+            use_spectral_norm=use_spectral_norm,
+        )
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = MLP(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+            use_spectral_norm=use_spectral_norm,
+        )
+
+    def forward(self, ctx, tgt, return_attention=False):
+        tgt_normed = self.norm1_tgt(tgt)
+        ctx_normed = self.norm1_ctx(ctx)
+        y, attn = self.attn(ctx_normed, tgt_normed)
+        if return_attention:
+            return attn
+        tgt = tgt + self.drop_path(y)
+        tgt = tgt + self.drop_path(self.mlp(self.norm2(tgt)))
+        return tgt
+
+
+class PatchEmbed(nn.Module):
+    """Image to Patch Embedding"""
+
+    def __init__(
+        self,
+        img_size=224,
+        patch_size=16,
+        in_chans=3,
+        embed_dim=768,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        num_patches = (img_size // patch_size) * (img_size // patch_size)
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+
+        proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        if use_spectral_norm:
+            proj = spectral_norm(proj)
+        self.proj = proj
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x = self.proj(x).flatten(2).transpose(1, 2)
+        return x
+
+
+class ConvEmbed(nn.Module):
+    """
+    3x3 Convolution stems for ViT following ViTC models
+    """
+
+    def __init__(
+        self,
+        channels,
+        strides,
+        img_size=224,
+        in_chans=3,
+        batch_norm=True,
+        use_spectral_norm=False,
+    ):
+        super().__init__()
+        # Build the stems
+        stem = []
+        channels = [in_chans] + channels
+        for i in range(len(channels) - 2):
+            layer = nn.Conv2d(
+                channels[i],
+                channels[i + 1],
+                kernel_size=3,
+                stride=strides[i],
+                padding=1,
+                bias=(not batch_norm),
+            )
+
+            if use_spectral_norm:
+                layer = spectral_norm(layer)
+
+            stem += [layer]
+            if batch_norm:
+                stem += [nn.BatchNorm2d(channels[i + 1])]
+            stem += [nn.ReLU(inplace=True)]
+
+        layer = nn.Conv2d(channels[-2], channels[-1], kernel_size=1, stride=strides[-1])
+        if use_spectral_norm:
+            layer = spectral_norm(layer)
+        stem += [layer]
+        self.stem = nn.Sequential(*stem)
+
+        # Comptute the number of patches
+        stride_prod = int(np.prod(strides))
+        self.num_patches = (img_size[0] // stride_prod) ** 2
+
+    def forward(self, x):
+        p = self.stem(x)
+        return p.flatten(2).transpose(1, 2)

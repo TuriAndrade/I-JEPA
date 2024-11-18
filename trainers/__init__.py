@@ -1,2 +1,4 @@
 from .ddp_classification_trainer import DDPClassificationTrainer
 from .ddp_ijepa_trainer import DDPIJepaTrainer
+from .ddp_ijepa_mine_mse_trainer import DDPIJepaMINEMSETrainer
+from .ddp_ijepa_mine_trainer import DDPIJepaMINETrainer

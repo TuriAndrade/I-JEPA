@@ -4,6 +4,8 @@ from batch_collators import norm_img, img_channels_first
 def default_ijepa_multiblock_collator(
     img_size=224,
     patch_size=16,
+    n_enc=1,
+    n_pred=4,
 ):
     return {
         "input_size": (img_size, img_size),
@@ -11,8 +13,8 @@ def default_ijepa_multiblock_collator(
         "enc_mask_scale": (0.85, 1.0),
         "pred_mask_scale": (0.15, 0.2),
         "aspect_ratio": (0.75, 1.5),
-        "nenc": 1,
-        "npred": 4,
+        "nenc": n_enc,
+        "npred": n_pred,
         "min_keep": 10,
         "allow_overlap": False,
         "data_transforms": [norm_img, img_channels_first],
