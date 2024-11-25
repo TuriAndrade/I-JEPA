@@ -5,7 +5,7 @@ from dataloaders import HDF5Dataset
 from report import ReportGenerator
 from tqdm import tqdm
 from optimizers import adamw_cosine_warmup_wd
-from models import apply_masks, repeat_interleave_batch
+from models import apply_masks, repeat_interleave_batch, VICReg
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -21,6 +21,7 @@ class DDPIJepaTrainer:
         predictor_config,
         batch_collator,
         batch_collator_config,
+        vic_reg_config,
         model_name,
         hdf5_dataset_train_config,
         train_data_frac,
@@ -55,6 +56,7 @@ class DDPIJepaTrainer:
         self.predictor_config = predictor_config
         self.batch_collator = batch_collator
         self.batch_collator_config = batch_collator_config
+        self.vic_reg_config = vic_reg_config
         self.model_name = model_name
         self.hdf5_dataset_train_config = hdf5_dataset_train_config
         self.train_data_frac = train_data_frac
@@ -86,8 +88,14 @@ class DDPIJepaTrainer:
         self.init_encoder = None
         self.init_target = None
         self.init_predictor = None
+        self.vic_reg = None
         self.metrics = {
             "loss": ["train", "val"],
+            "vic_reg_losses": {
+                "inv": ["train", "val"],
+                "std": ["train", "val"],
+                "cov": ["train", "val"],
+            },
             "learning_rate": ["learning_rate"],
             "weight_decay": ["weight_decay"],
         }
@@ -117,6 +125,7 @@ class DDPIJepaTrainer:
         self.init_encoder = self.encoder(**self.encoder_config)
         self.init_target = self.encoder(**self.encoder_config)
         self.init_predictor = self.predictor(**self.predictor_config)
+        self.init_vic_reg = VICReg(**self.vic_reg_config)
 
     def launch_models(self, device, world_size):
         encoder = self.encoder(**self.encoder_config).to(device)
@@ -128,15 +137,33 @@ class DDPIJepaTrainer:
         predictor = self.predictor(**self.predictor_config).to(device)
         predictor.load_state_dict(self.init_predictor.state_dict())
 
+        vic_reg = VICReg(**self.vic_reg_config).to(device)
+        vic_reg.load_state_dict(self.init_vic_reg.state_dict())
+
         if world_size > 1:
+            encoder = torch.nn.SyncBatchNorm.convert_sync_batchnorm(encoder)
+            target = torch.nn.SyncBatchNorm.convert_sync_batchnorm(target)
+            predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
+            vic_reg = torch.nn.SyncBatchNorm.convert_sync_batchnorm(vic_reg)
+
+            vic_reg_requires_grad = any(
+                param.requires_grad for param in vic_reg.parameters()
+            )
+
             return (
                 DDP(encoder, device_ids=[device]),
                 DDP(target, device_ids=[device]),
                 DDP(predictor, device_ids=[device]),
+                DDP(vic_reg, device_ids=[device]) if vic_reg_requires_grad else vic_reg,
             )
 
         else:
-            return encoder, target, predictor
+            return (
+                encoder,
+                target,
+                predictor,
+                vic_reg,
+            )
 
     def train_ddp(self, rank, world_size):
         self.ddp_setup(rank, world_size)
@@ -251,7 +278,7 @@ class DDPIJepaTrainer:
             ),
         )
 
-        encoder, target, predictor = self.launch_models(rank, world_size)
+        encoder, target, predictor, vic_reg = self.launch_models(rank, world_size)
         ipe = len(train_loader)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
             models=[encoder, predictor],
@@ -266,7 +293,7 @@ class DDPIJepaTrainer:
             ipe_scale=self.ipe_scale,
             opt_config=self.opt_config,
         )
-        criterion = F.mse_loss
+        criterion = vic_reg
         momentum_scheduler = (
             self.ema[0]
             + i * (self.ema[1] - self.ema[0]) / (ipe * self.epochs * self.ipe_scale)
@@ -286,6 +313,8 @@ class DDPIJepaTrainer:
 
                 encoder.train()
                 predictor.train()
+                vic_reg.train()
+
                 for data_batch, masks_enc, masks_pred in train_loader:
                     data_batch = data_batch.to(rank)
                     masks_enc = [mask.to(rank) for mask in masks_enc]
@@ -304,7 +333,9 @@ class DDPIJepaTrainer:
                     )
 
                     # 3. Compute loss
-                    loss = criterion(pred_out, tgt_out)
+                    loss, inv_loss, std_loss, cov_loss = criterion(
+                        enc_out, tgt_out, pred_out
+                    )
 
                     # 4. Compute gradients
                     loss.backward()
@@ -332,6 +363,21 @@ class DDPIJepaTrainer:
                         device=rank,
                     )
                     self.report_generator.add_epoch_metric(
+                        path="vic_reg_losses/inv/train",
+                        value=inv_loss.item(),
+                        device=rank,
+                    )
+                    self.report_generator.add_epoch_metric(
+                        path="vic_reg_losses/std/train",
+                        value=std_loss.item(),
+                        device=rank,
+                    )
+                    self.report_generator.add_epoch_metric(
+                        path="vic_reg_losses/cov/train",
+                        value=cov_loss.item(),
+                        device=rank,
+                    )
+                    self.report_generator.add_epoch_metric(
                         path="learning_rate",
                         value=lr,
                         device=rank,
@@ -354,8 +400,11 @@ class DDPIJepaTrainer:
                     bar.update(1)
 
                 with torch.no_grad():
+
                     encoder.eval()
                     predictor.eval()
+                    vic_reg.eval()
+
                     for data_batch, masks_enc, masks_pred in val_loader:
                         data_batch = data_batch.to(rank)
                         masks_enc = [mask.to(rank) for mask in masks_enc]
@@ -371,11 +420,28 @@ class DDPIJepaTrainer:
                         )
 
                         # 2. Compute loss
-                        loss = criterion(pred_out, tgt_out)
+                        loss, inv_loss, std_loss, cov_loss = criterion(
+                            enc_out, tgt_out, pred_out
+                        )
 
                         self.report_generator.add_epoch_metric(
                             path="loss/val",
                             value=loss.item(),
+                            device=rank,
+                        )
+                        self.report_generator.add_epoch_metric(
+                            path="vic_reg_losses/inv/val",
+                            value=inv_loss.item(),
+                            device=rank,
+                        )
+                        self.report_generator.add_epoch_metric(
+                            path="vic_reg_losses/std/val",
+                            value=std_loss.item(),
+                            device=rank,
+                        )
+                        self.report_generator.add_epoch_metric(
+                            path="vic_reg_losses/cov/val",
+                            value=cov_loss.item(),
                             device=rank,
                         )
                         bar.set_postfix(

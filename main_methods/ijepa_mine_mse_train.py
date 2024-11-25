@@ -23,6 +23,7 @@ def main(
     warmup_epochs=40,
     use_spectral_norm=True,
     cross_attn=False,
+    ddp=True,
 ):
     #
     # Dataset
@@ -52,22 +53,20 @@ def main(
         model_name=encoder_name,
         img_size=img_size,
         patch_size=patch_size,
-        use_spectral_norm=bool(use_spectral_norm),
+        use_spectral_norm=use_spectral_norm,
     )
 
     #
     # Predictor
     #
     predictor = (
-        MutualInformationCrossPredictor
-        if bool(cross_attn)
-        else MutualInformationPredictor
+        MutualInformationCrossPredictor if cross_attn else MutualInformationPredictor
     )
     predictor_cfg = model_config.get_model_config(
         model_name=predictor_name,
         img_size=img_size,
         patch_size=patch_size,
-        use_spectral_norm=bool(use_spectral_norm),
+        use_spectral_norm=use_spectral_norm,
         mse_factor=0,
         mi_factor=1,
     )
@@ -102,12 +101,16 @@ def main(
         batch_size=128,
         save_ckpt_interval=10,
         save_predictor=False,
-        epochs=int(epochs),
-        warmup_epochs=int(warmup_epochs),
+        epochs=epochs,
+        warmup_epochs=warmup_epochs,
         save_path=save_path,
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),
     )
     trainer = DDPIJepaMINEMSETrainer(**trainer_cfg)
 
-    trainer.spawn_single_train()
+    if ddp:
+        trainer.spawn_train_ddp()
+
+    else:
+        trainer.spawn_single_train()

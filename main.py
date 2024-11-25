@@ -1,3 +1,23 @@
+def evaluate_object(obj):
+    if isinstance(obj, (int, float, bool)):
+        # If it's an int, float, or bool, return it as is
+        return obj
+
+    elif isinstance(obj, str):
+        # Try evaluating the string, if it fails treat it as plain text
+        try:
+            # Attempt evaluation
+            evaluated = eval(obj)
+            return evaluated
+
+        except (SyntaxError, NameError):
+            # Return as plain string if eval fails with SyntaxError or NameError
+            return obj
+    else:
+        # For other types, you might want to return a string representation
+        return repr(obj)
+
+
 def parse_args_to_dict(args):
     """Convert list of arguments to a dictionary, allowing multiple values for the same key."""
     kwargs = {}
@@ -12,11 +32,11 @@ def parse_args_to_dict(args):
                 if key in kwargs:
                     # If the key already exists, append the new value to the list
                     if isinstance(kwargs[key], list):
-                        kwargs[key].append(value)
+                        kwargs[key].append(evaluate_object(value))
                     else:
-                        kwargs[key] = [kwargs[key], value]
+                        kwargs[key] = [kwargs[key], evaluate_object(value)]
                 else:
-                    kwargs[key] = value  # First occurrence
+                    kwargs[key] = evaluate_object(value)  # First occurrence
 
         elif arg.startswith("-"):
             # Handle short option names
@@ -26,11 +46,11 @@ def parse_args_to_dict(args):
                 if key in kwargs:
                     # If the key already exists, append the new value to the list
                     if isinstance(kwargs[key], list):
-                        kwargs[key].append(value)
+                        kwargs[key].append(evaluate_object(value))
                     else:
-                        kwargs[key] = [kwargs[key], value]
+                        kwargs[key] = [kwargs[key], evaluate_object(value)]
                 else:
-                    kwargs[key] = value  # First occurrence
+                    kwargs[key] = evaluate_object(value)  # First occurrence
     return kwargs
 
 

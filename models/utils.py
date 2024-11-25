@@ -8,6 +8,7 @@
 import torch
 import math
 import numpy as np
+import torch.distributed as dist
 
 import torch
 import torch.nn as nn
@@ -149,6 +150,12 @@ def drop_path(x, drop_prob: float = 0.0, training: bool = False):
     random_tensor.floor_()  # binarize
     output = x.div(keep_prob) * random_tensor
     return output
+
+
+def off_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
 
 class DropPath(nn.Module):
@@ -472,3 +479,32 @@ class ConvEmbed(nn.Module):
     def forward(self, x):
         p = self.stem(x)
         return p.flatten(2).transpose(1, 2)
+
+
+class FullGatherLayer(torch.autograd.Function):
+    """
+    Gather tensors from all processes and support backward propagation
+    for the gradients across processes.
+    """
+
+    @staticmethod
+    def forward(ctx, x):
+        output = [torch.zeros_like(x) for _ in range(dist.get_world_size())]
+        dist.all_gather(output, x)
+        return tuple(output)
+
+    @staticmethod
+    def backward(ctx, *grads):
+        # Sum the gradients from all outputs
+        grad_input = sum(grads)
+        return grad_input
+
+
+def Projector(dims):
+    layers = []
+    for i in range(len(dims) - 2):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        layers.append(nn.BatchNorm1d(dims[i + 1]))
+        layers.append(nn.ReLU(True))
+    layers.append(nn.Linear(dims[-2], dims[-1], bias=False))
+    return nn.Sequential(*layers)

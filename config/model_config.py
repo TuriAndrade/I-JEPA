@@ -105,8 +105,44 @@ def vit_tiny(
     }
 
 
+def vic_reg_25_25_1_tiny(apply_reg=True):
+    return {
+        "projector_dims": [192, 64, 32],
+        "coeffs": [1, 1, 0.04],
+        "std_cov_grad": apply_reg,
+    }
+
+
+def vic_reg_25_1_1_tiny(apply_reg=True):
+    return {
+        "projector_dims": [192, 64, 32],
+        "coeffs": [1, 0.04, 0.04],
+        "std_cov_grad": apply_reg,
+    }
+
+
+def vic_reg_25_2_1_tiny(apply_reg=True):
+    return {
+        "projector_dims": [192, 64, 32],
+        "coeffs": [1, 0.08, 0.04],
+        "std_cov_grad": apply_reg,
+    }
+
+
+def vic_reg_25_4_1_tiny(apply_reg=True):
+    return {
+        "projector_dims": [192, 64, 32],
+        "coeffs": [1, 0.16, 0.04],
+        "std_cov_grad": apply_reg,
+    }
+
+
 model_configs = {
     "vit_tiny": vit_tiny,
+    "vic_reg_25_25_1_tiny": vic_reg_25_25_1_tiny,
+    "vic_reg_25_1_1_tiny": vic_reg_25_1_1_tiny,
+    "vic_reg_25_2_1_tiny": vic_reg_25_2_1_tiny,
+    "vic_reg_25_4_1_tiny": vic_reg_25_4_1_tiny,
     "vit_predictor_tiny": vit_predictor_tiny,
     "mutual_information_predictor_tiny": mutual_information_predictor_tiny,
     "mutual_information_estimator_tiny": mutual_information_estimator_tiny,

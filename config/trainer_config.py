@@ -8,6 +8,7 @@ def default_ijepa_trainer(
     predictor_config,
     batch_collator,
     batch_collator_config,
+    vic_reg_config,
     hdf5_dataset_train_config,
     hdf5_dataset_val_config,
     model_name="ijepa",
@@ -29,6 +30,7 @@ def default_ijepa_trainer(
         "predictor_config": predictor_config,
         "batch_collator": batch_collator,
         "batch_collator_config": batch_collator_config,
+        "vic_reg_config": vic_reg_config,
         "model_name": model_name,
         "hdf5_dataset_train_config": hdf5_dataset_train_config,
         "train_data_frac": train_data_frac,
@@ -55,7 +57,7 @@ def default_ijepa_trainer(
         "master_port": master_port,
         "backend": "nccl",
         "main_device": 0,
-        "process_timeout": 100000,
+        "process_timeout": 60,
     }
 
 

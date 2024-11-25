@@ -36,7 +36,7 @@ def main(
     if save_path is None:
         save_path = os.path.join(
             os.environ.get("output_dir"),
-            f"clf_{model_name}" if not pretrained else f"pretrained_clf_{model_name}",
+            (f"clf_{model_name}" if not pretrained else f"pretrained_clf_{model_name}"),
             dataset_name,
         )
 

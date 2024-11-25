@@ -18,6 +18,7 @@ def main(
     epochs=300,
     warmup_epochs=40,
     use_spectral_norm=True,
+    ddp=True,
 ):
     #
     # Dataset
@@ -47,7 +48,7 @@ def main(
         model_name=encoder_name,
         img_size=img_size,
         patch_size=patch_size,
-        use_spectral_norm=bool(use_spectral_norm),
+        use_spectral_norm=use_spectral_norm,
     )
 
     #
@@ -58,7 +59,7 @@ def main(
         model_name=predictor_name,
         img_size=img_size,
         patch_size=patch_size,
-        use_spectral_norm=bool(use_spectral_norm),
+        use_spectral_norm=use_spectral_norm,
     )
 
     #
@@ -91,12 +92,16 @@ def main(
         batch_size=256,
         save_ckpt_interval=10,
         save_predictor=False,
-        epochs=int(epochs),
-        warmup_epochs=int(warmup_epochs),
+        epochs=epochs,
+        warmup_epochs=warmup_epochs,
         save_path=save_path,
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),
     )
     trainer = DDPIJepaMINETrainer(**trainer_cfg)
 
-    trainer.spawn_single_train()
+    if ddp:
+        trainer.spawn_train_ddp()
+
+    else:
+        trainer.spawn_single_train()

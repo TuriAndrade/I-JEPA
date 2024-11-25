@@ -18,6 +18,7 @@ def main(
     data_frac=1,
     epochs=20,
     warmup_epochs=3,
+    ddp=True,
 ):
     #
     # Dataset
@@ -80,12 +81,16 @@ def main(
         hdf5_dataset_val_config=hdf5_dataset_val_cfg,
         val_data_frac=data_frac,
         batch_size=128,
-        epochs=int(epochs),
-        warmup_epochs=int(warmup_epochs),
+        epochs=epochs,
+        warmup_epochs=warmup_epochs,
         save_path=save_path,
         master_addr=os.environ.get("default_addr"),
         master_port=os.environ.get("default_port"),
     )
     trainer = DDPClassificationTrainer(**trainer_cfg)
 
-    trainer.spawn_single_train()
+    if ddp:
+        trainer.spawn_train_ddp()
+
+    else:
+        trainer.spawn_single_train()
