@@ -281,7 +281,7 @@ class DDPIJepaTrainer:
         encoder, target, predictor, vic_reg = self.launch_models(rank, world_size)
         ipe = len(train_loader)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
-            models=[encoder, predictor],
+            models=[encoder, predictor, vic_reg],
             iterations_per_epoch=ipe,
             start_lr=self.start_lr,
             ref_lr=self.ref_lr,

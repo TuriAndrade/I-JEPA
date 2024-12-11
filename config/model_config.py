@@ -137,10 +137,10 @@ def vic_reg_25_4_1_tiny(apply_reg=True):
     }
 
 
-def vic_reg_25_2_2_tiny(apply_reg=True):
+def vic_reg_10_1_1_tiny(apply_reg=True):
     return {
         "projector_dims": [192, 64, 32],
-        "coeffs": [1, 0.08, 0.08],
+        "coeffs": [1, 0.1, 0.1],
         "std_cov_grad": apply_reg,
     }
 
@@ -159,7 +159,7 @@ model_configs = {
     "vic_reg_25_1_1_tiny": vic_reg_25_1_1_tiny,
     "vic_reg_25_2_1_tiny": vic_reg_25_2_1_tiny,
     "vic_reg_25_4_1_tiny": vic_reg_25_4_1_tiny,
-    "vic_reg_25_2_2_tiny": vic_reg_25_2_2_tiny,
+    "vic_reg_10_1_1_tiny": vic_reg_10_1_1_tiny,
     "vic_reg_25_4_2_tiny": vic_reg_25_4_2_tiny,
     "vit_predictor_tiny": vit_predictor_tiny,
     "mutual_information_predictor_tiny": mutual_information_predictor_tiny,
