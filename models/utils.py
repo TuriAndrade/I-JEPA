@@ -481,6 +481,8 @@ class ConvEmbed(nn.Module):
         return p.flatten(2).transpose(1, 2)
 
 
+# OBS: FullGatherLayer sometimes does not work for small batch sizes due to all_gather inconsistencies.
+# Batch size > 128 works fine. If it becomes a problem, look into padding for making batches the same shape.
 class FullGatherLayer(torch.autograd.Function):
     """
     Gather tensors from all processes and support backward propagation
@@ -500,11 +502,29 @@ class FullGatherLayer(torch.autograd.Function):
         return grad_input
 
 
-def Projector(dims):
-    layers = []
-    for i in range(len(dims) - 2):
-        layers.append(nn.Linear(dims[i], dims[i + 1]))
-        layers.append(nn.BatchNorm1d(dims[i + 1]))
-        layers.append(nn.ReLU(True))
-    layers.append(nn.Linear(dims[-2], dims[-1], bias=False))
-    return nn.Sequential(*layers)
+class Projector(nn.Module):
+    def __init__(self, dims, init_std=0.02):
+        super().__init__()
+        self.init_std = init_std
+
+        layers = []
+        for i in range(len(dims) - 2):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            layers.append(nn.BatchNorm1d(dims[i + 1]))
+            layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(dims[-2], dims[-1], bias=False))
+        self.layers = nn.Sequential(*layers)
+
+        self.apply(self._init_weights)
+
+    def forward(self, x):
+        return self.layers(x)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=self.init_std)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.BatchNorm1d):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)

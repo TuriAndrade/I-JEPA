@@ -85,10 +85,6 @@ class DDPIJepaTrainer:
         self.main_device = main_device
         self.process_timeout = process_timeout
 
-        self.init_encoder = None
-        self.init_target = None
-        self.init_predictor = None
-        self.vic_reg = None
         self.metrics = {
             "loss": ["train", "val"],
             "vic_reg_losses": {
@@ -125,45 +121,30 @@ class DDPIJepaTrainer:
         self.init_encoder = self.encoder(**self.encoder_config)
         self.init_target = self.encoder(**self.encoder_config)
         self.init_predictor = self.predictor(**self.predictor_config)
-        self.init_vic_reg = VICReg(**self.vic_reg_config)
+
+        self.init_vic_reg = VICReg(
+            self.init_encoder,
+            self.init_target,
+            self.init_predictor,
+            **self.vic_reg_config,
+        )
 
     def launch_models(self, device, world_size):
-        encoder = self.encoder(**self.encoder_config).to(device)
-        encoder.load_state_dict(self.init_encoder.state_dict())
-
-        target = self.encoder(**self.encoder_config).to(device)
-        target.load_state_dict(self.init_target.state_dict())
-
-        predictor = self.predictor(**self.predictor_config).to(device)
-        predictor.load_state_dict(self.init_predictor.state_dict())
-
-        vic_reg = VICReg(**self.vic_reg_config).to(device)
+        vic_reg = VICReg(
+            self.init_encoder,
+            self.init_target,
+            self.init_predictor,
+            **self.vic_reg_config,
+        ).to(device)
         vic_reg.load_state_dict(self.init_vic_reg.state_dict())
 
         if world_size > 1:
-            encoder = torch.nn.SyncBatchNorm.convert_sync_batchnorm(encoder)
-            target = torch.nn.SyncBatchNorm.convert_sync_batchnorm(target)
-            predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
             vic_reg = torch.nn.SyncBatchNorm.convert_sync_batchnorm(vic_reg)
 
-            vic_reg_requires_grad = any(
-                param.requires_grad for param in vic_reg.parameters()
-            )
-
-            return (
-                DDP(encoder, device_ids=[device]),
-                DDP(target, device_ids=[device]),
-                DDP(predictor, device_ids=[device]),
-                DDP(vic_reg, device_ids=[device]) if vic_reg_requires_grad else vic_reg,
-            )
+            return DDP(vic_reg, device_ids=[device])
 
         else:
-            return (
-                encoder,
-                target,
-                predictor,
-                vic_reg,
-            )
+            return vic_reg
 
     def train_ddp(self, rank, world_size):
         self.ddp_setup(rank, world_size)
@@ -229,18 +210,6 @@ class DDPIJepaTrainer:
 
         self.train(rank=self.main_device, world_size=1)
 
-    def _forward_target(self, target, x, masks_enc, masks_pred):
-        with torch.no_grad():
-            tgt = target(x)
-            tgt = F.layer_norm(tgt, (tgt.size(-1),))
-            B = len(tgt)
-
-            # -- create targets (masked regions of tgt) --
-            tgt = apply_masks(tgt, masks_pred)
-            tgt = repeat_interleave_batch(tgt, B, repeat=len(masks_enc))
-
-            return tgt
-
     def train(
         self,
         rank,
@@ -278,10 +247,10 @@ class DDPIJepaTrainer:
             ),
         )
 
-        encoder, target, predictor, vic_reg = self.launch_models(rank, world_size)
+        vic_reg = self.launch_models(rank, world_size)
         ipe = len(train_loader)
         optimizer, _, scheduler, wd_scheduler = adamw_cosine_warmup_wd(
-            models=[encoder, predictor, vic_reg],
+            models=vic_reg,
             iterations_per_epoch=ipe,
             start_lr=self.start_lr,
             ref_lr=self.ref_lr,
@@ -293,7 +262,6 @@ class DDPIJepaTrainer:
             ipe_scale=self.ipe_scale,
             opt_config=self.opt_config,
         )
-        criterion = vic_reg
         momentum_scheduler = (
             self.ema[0]
             + i * (self.ema[1] - self.ema[0]) / (ipe * self.epochs * self.ipe_scale)
@@ -311,51 +279,40 @@ class DDPIJepaTrainer:
                     device=rank,
                 )
 
-                encoder.train()
-                predictor.train()
                 vic_reg.train()
 
-                for data_batch, masks_enc, masks_pred in train_loader:
+                for data_batch, masks_ctx, masks_tgt in train_loader:
                     data_batch = data_batch.to(rank)
-                    masks_enc = [mask.to(rank) for mask in masks_enc]
-                    masks_pred = [mask.to(rank) for mask in masks_pred]
+                    masks_ctx = [mask.to(rank) for mask in masks_ctx]
+                    masks_tgt = [mask.to(rank) for mask in masks_tgt]
 
                     # 1. Zero grad
                     optimizer.zero_grad()
 
-                    # 2.1 Fwd pass enc
-                    enc_out = encoder(data_batch, masks_enc)
-                    pred_out = predictor(enc_out, masks_enc, masks_pred)
-
-                    # 2.2 Fwd pass target (NO GRAD)
-                    tgt_out = self._forward_target(
-                        target, data_batch, masks_enc, masks_pred
+                    # 2 Fwd pass
+                    loss, inv_loss, std_loss, cov_loss = vic_reg(
+                        data_batch, masks_ctx, masks_tgt
                     )
 
-                    # 3. Compute loss
-                    loss, inv_loss, std_loss, cov_loss = criterion(
-                        enc_out, tgt_out, pred_out
-                    )
-
-                    # 4. Compute gradients
+                    # 3. Compute gradients
                     loss.backward()
 
-                    # 5. Update encoder weights
+                    # 4. Update encoder weights
                     optimizer.step()
 
-                    # 6. Update learning rate
+                    # 5. Update learning rate
                     lr = scheduler.step()
 
-                    # 7. Update weight decay
+                    # 6. Update weight decay
                     wd = wd_scheduler.step()
 
-                    # 8. Update target weights
-                    with torch.no_grad():
-                        m = next(momentum_scheduler)
-                        for param_q, param_k in zip(
-                            encoder.parameters(), target.parameters()
-                        ):
-                            param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
+                    # 7. Update target weights
+                    m = next(momentum_scheduler)
+                    (
+                        vic_reg.module._update_target(m)
+                        if world_size > 1
+                        else vic_reg._update_target(m)
+                    )
 
                     self.report_generator.add_epoch_metric(
                         path="loss/train",
@@ -400,28 +357,16 @@ class DDPIJepaTrainer:
                     bar.update(1)
 
                 with torch.no_grad():
-
-                    encoder.eval()
-                    predictor.eval()
                     vic_reg.eval()
 
-                    for data_batch, masks_enc, masks_pred in val_loader:
+                    for data_batch, masks_ctx, masks_tgt in val_loader:
                         data_batch = data_batch.to(rank)
-                        masks_enc = [mask.to(rank) for mask in masks_enc]
-                        masks_pred = [mask.to(rank) for mask in masks_pred]
+                        masks_ctx = [mask.to(rank) for mask in masks_ctx]
+                        masks_tgt = [mask.to(rank) for mask in masks_tgt]
 
-                        # 1.1 Fwd pass target
-                        enc_out = encoder(data_batch, masks_enc)
-                        pred_out = predictor(enc_out, masks_enc, masks_pred)
-
-                        # 1.2 Fwd pass target
-                        tgt_out = self._forward_target(
-                            target, data_batch, masks_enc, masks_pred
-                        )
-
-                        # 2. Compute loss
-                        loss, inv_loss, std_loss, cov_loss = criterion(
-                            enc_out, tgt_out, pred_out
+                        # 1. Fwd pass
+                        loss, inv_loss, std_loss, cov_loss = vic_reg(
+                            data_batch, masks_ctx, masks_tgt
                         )
 
                         self.report_generator.add_epoch_metric(
@@ -464,12 +409,24 @@ class DDPIJepaTrainer:
                     self.report_generator.save_models(
                         models=(
                             {
-                                f"{self.model_name}_enc_epoch_{epoch + 1}": encoder.module,
-                                f"{self.model_name}_pred_epoch_{epoch + 1}": predictor.module,
+                                f"{self.model_name}_enc_epoch_{epoch + 1}": (
+                                    vic_reg.module.encoder
+                                    if world_size > 1
+                                    else vic_reg.encoder
+                                ),
+                                f"{self.model_name}_pred_epoch_{epoch + 1}": (
+                                    vic_reg.module.predictor
+                                    if world_size > 1
+                                    else vic_reg.predictor
+                                ),
                             }
                             if self.save_predictor
                             else {
-                                f"{self.model_name}_enc_epoch_{epoch + 1}": encoder.module
+                                f"{self.model_name}_enc_epoch_{epoch + 1}": (
+                                    vic_reg.module.encoder
+                                    if world_size > 1
+                                    else vic_reg.encoder
+                                )
                             }
                         ),
                         device=rank,

@@ -107,49 +107,55 @@ def vit_tiny(
 
 def vic_reg_25_25_1_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 1, 0.04],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 
 def vic_reg_25_1_1_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 0.04, 0.04],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 
 def vic_reg_25_2_1_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 0.08, 0.04],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 
 def vic_reg_25_4_1_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 0.16, 0.04],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 
 def vic_reg_10_1_1_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 0.1, 0.1],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 
 def vic_reg_25_4_2_tiny(apply_reg=True):
     return {
-        "projector_dims": [192, 64, 32],
+        "projector_dims": [192, 192, 192],
         "coeffs": [1, 0.16, 0.08],
         "std_cov_grad": apply_reg,
+        "project": apply_reg,
     }
 
 

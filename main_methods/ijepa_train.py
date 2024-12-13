@@ -103,7 +103,7 @@ def main(
         train_data_frac=1,
         hdf5_dataset_val_config=hdf5_dataset_val_cfg,
         val_data_frac=1,
-        batch_size=128,
+        batch_size=196,
         save_ckpt_interval=10,
         save_predictor=False,
         epochs=epochs,
