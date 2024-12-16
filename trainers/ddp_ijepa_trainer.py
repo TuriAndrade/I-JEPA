@@ -5,10 +5,9 @@ from dataloaders import HDF5Dataset
 from report import ReportGenerator
 from tqdm import tqdm
 from optimizers import adamw_cosine_warmup_wd
-from models import apply_masks, repeat_interleave_batch, VICReg
+from models import VICReg
 import torch
 import torch.multiprocessing as mp
-import torch.nn.functional as F
 import os
 
 
