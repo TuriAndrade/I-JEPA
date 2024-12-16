@@ -72,18 +72,19 @@ class VICReg(nn.Module):
         B_ctx, L_ctx, _ = z_ctx.shape
         B_tgt, L_tgt, _ = z_tgt.shape
 
-        # Flatten for projection
-        z_ctx = z_ctx.view(-1, z_ctx.size(-1))
-        z_tgt = z_tgt.view(-1, z_tgt.size(-1))
         if self.project:
+            # Flatten for projection
+            z_ctx = z_ctx.view(-1, z_ctx.size(-1))
+            z_tgt = z_tgt.view(-1, z_tgt.size(-1))
+
             z_ctx = self.encoder_projector(z_ctx)
 
             with torch.no_grad():
                 z_tgt = self.target_projector(z_tgt)
 
-        # Revert to original shape for predictor
-        z_ctx = z_ctx.view(B_ctx, L_ctx, -1)
-        z_tgt = z_tgt.view(B_tgt, L_tgt, -1)
+            # Revert to original shape for predictor
+            z_ctx = z_ctx.view(B_ctx, L_ctx, -1)
+            z_tgt = z_tgt.view(B_tgt, L_tgt, -1)
 
         z_pred_tgt = self.predictor(z_ctx, masks_ctx, masks_tgt)
 
