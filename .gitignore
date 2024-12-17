@@ -4,6 +4,9 @@ data/
 # Training and evaluation reports
 output/
 
+# Execution commands (mainly for grid search)
+commands/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
