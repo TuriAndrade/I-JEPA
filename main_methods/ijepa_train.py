@@ -25,6 +25,8 @@ def main(
     use_spectral_norm=False,
     cross_attn=False,
     ddp=True,
+    vic_reg_apply_reg=True,
+    vic_reg_project=True,
 ):
     #
     # Dataset
@@ -85,6 +87,8 @@ def main(
     #
     vic_reg_cfg = model_config.get_model_config(
         model_name=vic_reg_name,
+        apply_reg=vic_reg_apply_reg,
+        project=vic_reg_project,
     )
 
     #

@@ -33,7 +33,8 @@ class VICReg(nn.Module):
         self.target_projector = Projector(projector_dims) if project else None
 
         self.target.requires_grad_(False)
-        self.target_projector.requires_grad_(False)
+        if project:
+            self.target_projector.requires_grad_(False)
 
     def _forward_target(self, x, masks_ctx, masks_tgt):
         with torch.no_grad():

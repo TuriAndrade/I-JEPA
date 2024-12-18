@@ -114,6 +114,15 @@ def vic_reg_25_25_1_tiny(apply_reg=True, project=True):
     }
 
 
+def vic_reg_10_10_1_tiny(apply_reg=True, project=True):
+    return {
+        "projector_dims": [192, 192, 192],
+        "coeffs": [1, 1, 0.1],
+        "std_cov_grad": apply_reg,
+        "project": project,
+    }
+
+
 def vic_reg_25_1_1_tiny(apply_reg=True, project=True):
     return {
         "projector_dims": [192, 192, 192],
@@ -162,6 +171,7 @@ def vic_reg_25_4_2_tiny(apply_reg=True, project=True):
 model_configs = {
     "vit_tiny": vit_tiny,
     "vic_reg_25_25_1_tiny": vic_reg_25_25_1_tiny,
+    "vic_reg_10_10_1_tiny": vic_reg_10_10_1_tiny,
     "vic_reg_25_1_1_tiny": vic_reg_25_1_1_tiny,
     "vic_reg_25_2_1_tiny": vic_reg_25_2_1_tiny,
     "vic_reg_25_4_1_tiny": vic_reg_25_4_1_tiny,
