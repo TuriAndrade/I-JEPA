@@ -29,12 +29,8 @@ class VICReg(nn.Module):
         self.project = project
         self.std_cov_grad = std_cov_grad
 
-        self.encoder_projector = Projector(projector_dims) if project else None
-        self.target_projector = Projector(projector_dims) if project else None
-
+        self.projector = Projector(projector_dims) if project else None
         self.target.requires_grad_(False)
-        if project:
-            self.target_projector.requires_grad_(False)
 
     def _forward_target(self, x, masks_ctx, masks_tgt):
         with torch.no_grad():
@@ -57,46 +53,21 @@ class VICReg(nn.Module):
                     (1.0 - momentum) * param_q.detach().data
                 )
 
-            if self.project:
-                for param_q, param_k in zip(
-                    self.encoder_projector.parameters(),
-                    self.target_projector.parameters(),
-                ):
-                    param_k.data.mul_(momentum).add_(
-                        (1.0 - momentum) * param_q.detach().data
-                    )
-
     def forward(self, x, masks_ctx, masks_tgt):
         z_ctx = self.encoder(x, masks_ctx)
         z_tgt = self._forward_target(x, masks_ctx, masks_tgt)
-
-        B_ctx, L_ctx, _ = z_ctx.shape
-        B_tgt, L_tgt, _ = z_tgt.shape
-
-        if self.project:
-            # Flatten for projection
-            z_ctx = z_ctx.view(-1, z_ctx.size(-1))
-            z_tgt = z_tgt.view(-1, z_tgt.size(-1))
-
-            z_ctx = self.encoder_projector(z_ctx)
-
-            with torch.no_grad():
-                z_tgt = self.target_projector(z_tgt)
-
-            # Revert to original shape for predictor
-            z_ctx = z_ctx.view(B_ctx, L_ctx, -1)
-            z_tgt = z_tgt.view(B_tgt, L_tgt, -1)
-
         z_pred_tgt = self.predictor(z_ctx, masks_ctx, masks_tgt)
 
         # 1. Compute invariance loss
         inv_loss = F.mse_loss(z_pred_tgt, z_tgt)
 
+        z_ctx = z_ctx.view(-1, z_ctx.size(-1))
+
+        if self.project:
+            z_ctx = self.projector(z_ctx)
+
         if not self.std_cov_grad:
             z_ctx = z_ctx.detach()
-
-        # Flatten for loss computation
-        z_ctx = z_ctx.view(-1, z_ctx.size(-1))
 
         # 2. Gather from all gpus
         z_ctx = torch.cat(FullGatherLayer.apply(z_ctx.contiguous()), dim=0)
