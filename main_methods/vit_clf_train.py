@@ -19,6 +19,8 @@ def main(
     epochs=20,
     warmup_epochs=3,
     ddp=True,
+    use_spectral_norm=False,
+    use_sem=False,
 ):
     #
     # Dataset
@@ -56,6 +58,8 @@ def main(
         img_size=img_size,
         patch_size=patch_size,
         out_dim=n_classes,
+        use_spectral_norm=use_spectral_norm,
+        use_sem=use_sem,
     )
 
     #

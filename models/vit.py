@@ -19,6 +19,8 @@ from .utils import (
     apply_masks,
 )
 
+from .sem import SEM
+
 
 class VisionTransformer(nn.Module):
     """Vision Transformer"""
@@ -43,6 +45,8 @@ class VisionTransformer(nn.Module):
         init_std=0.02,
         out_dim=None,
         use_spectral_norm=False,
+        use_sem=False,
+        sem_config=None,
         **kwargs
     ):
         super().__init__()
@@ -98,6 +102,12 @@ class VisionTransformer(nn.Module):
             self.cls_head = cls_head
         else:
             self.cls_head = None
+
+        if use_sem:
+            self.sem = SEM(**sem_config)
+        else:
+            self.sem = None
+
         # ------
         self.init_std = init_std
         self.apply(self._init_weights)
@@ -147,6 +157,9 @@ class VisionTransformer(nn.Module):
 
         if self.norm is not None:
             x = self.norm(x)
+
+        if self.sem is not None:
+            x = self.sem(x)
 
         if self.cls_head is not None:
             x = x.mean(dim=1)  # Global average pooling

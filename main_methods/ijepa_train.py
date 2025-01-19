@@ -23,6 +23,7 @@ def main(
     epochs=300,
     warmup_epochs=40,
     use_spectral_norm=False,
+    use_sem=False,
     cross_attn=False,
     ddp=True,
     vic_reg_apply_reg=True,
@@ -57,6 +58,7 @@ def main(
         img_size=img_size,
         patch_size=patch_size,
         use_spectral_norm=use_spectral_norm,
+        use_sem=use_sem,
     )
 
     #

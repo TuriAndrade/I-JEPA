@@ -189,11 +189,11 @@ class ClassificationEvaluation:
         }
 
         metrics_df = pd.DataFrame(metrics_dict)
-        metrics_csv_path = os.path.join(self.save_path, "test_metrics.csv")
+        metrics_csv_path = os.path.join(self.save_path, "test_clf_eval_metrics.csv")
         metrics_df.to_csv(metrics_csv_path, index=False)
 
         # Save model information to a json file
-        model_info_path = os.path.join(self.save_path, "test_model_info.json")
+        model_info_path = os.path.join(self.save_path, "test_clf_eval_info.json")
         with open(model_info_path, "w") as f:
             json.dump(
                 {

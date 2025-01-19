@@ -82,6 +82,12 @@ def vit_tiny(
     patch_size=16,
     out_dim=None,
     use_spectral_norm=False,
+    use_sem=False,
+    sem_config={
+        "L": 24,
+        "V": 8,
+        "tau": 0.5,
+    },
 ):
     return {
         "img_size": [img_size],
@@ -102,6 +108,8 @@ def vit_tiny(
         "init_std": 0.02,
         "out_dim": out_dim,
         "use_spectral_norm": use_spectral_norm,
+        "use_sem": use_sem,
+        "sem_config": sem_config,
     }
 
 

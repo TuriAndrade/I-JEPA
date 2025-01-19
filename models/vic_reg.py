@@ -35,7 +35,7 @@ class VICReg(nn.Module):
     def _forward_target(self, x, masks_ctx, masks_tgt):
         with torch.no_grad():
             z_tgt = self.target(x)
-            z_tgt = F.layer_norm(z_tgt, (z_tgt.size(-1),))
+            # z_tgt = F.layer_norm(z_tgt, (z_tgt.size(-1),)) # redundant ???? base model applies layer_norm at the end
             B = len(z_tgt)
 
             # -- create targets (masked regions of tgt) --
@@ -63,11 +63,11 @@ class VICReg(nn.Module):
 
         z_ctx = z_ctx.view(-1, z_ctx.size(-1))
 
-        if self.project:
-            z_ctx = self.projector(z_ctx)
-
         if not self.std_cov_grad:
             z_ctx = z_ctx.detach()
+
+        if self.project:
+            z_ctx = self.projector(z_ctx)
 
         # 2. Gather from all gpus
         z_ctx = torch.cat(FullGatherLayer.apply(z_ctx.contiguous()), dim=0)
