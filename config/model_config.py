@@ -113,66 +113,115 @@ def vit_tiny(
     }
 
 
-def vic_reg_25_25_1_tiny(apply_reg=True, project=True):
+def vic_reg_25_25_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 1, 0.04],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_10_10_1_tiny(apply_reg=True, project=True):
+def vic_reg_10_10_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 1, 0.1],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_25_1_1_tiny(apply_reg=True, project=True):
+def vic_reg_25_1_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 0.04, 0.04],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_25_2_1_tiny(apply_reg=True, project=True):
+def vic_reg_25_2_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 0.08, 0.04],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_25_4_1_tiny(apply_reg=True, project=True):
+def vic_reg_25_4_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 0.16, 0.04],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_10_1_1_tiny(apply_reg=True, project=True):
+def vic_reg_10_1_1_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 0.1, 0.1],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 
-def vic_reg_25_4_2_tiny(apply_reg=True, project=True):
+def vic_reg_25_4_2_tiny(
+    apply_reg=True,
+    project=True,
+    batched=False,
+):
     return {
         "projector_dims": [192, 64, 32],
         "coeffs": [1, 0.16, 0.08],
         "std_cov_grad": apply_reg,
         "project": project,
+        "gamma": 1,
+        "epsilon": 1e-4,
+        "batched": batched,
     }
 
 

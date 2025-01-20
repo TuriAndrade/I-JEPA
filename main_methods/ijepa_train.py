@@ -28,6 +28,7 @@ def main(
     ddp=True,
     vic_reg_apply_reg=True,
     vic_reg_project=True,
+    vic_reg_batched=False,
 ):
     #
     # Dataset
@@ -91,6 +92,7 @@ def main(
         model_name=vic_reg_name,
         apply_reg=vic_reg_apply_reg,
         project=vic_reg_project,
+        batched=vic_reg_batched,
     )
 
     #

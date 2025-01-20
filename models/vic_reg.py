@@ -5,6 +5,7 @@ from .utils import (
     Projector,
     FullGatherLayer,
     off_diagonal,
+    batch_off_diagonal,
     repeat_interleave_batch,
     apply_masks,
 )
@@ -20,6 +21,9 @@ class VICReg(nn.Module):
         coeffs,
         project,
         std_cov_grad,
+        gamma=1,
+        epsilon=1e-4,
+        batched=False,
     ):
         super().__init__()
         self.encoder = encoder
@@ -28,9 +32,13 @@ class VICReg(nn.Module):
         self.inv_coeff, self.std_coeff, self.cov_coeff = coeffs
         self.project = project
         self.std_cov_grad = std_cov_grad
+        self.gamma = gamma
+        self.epsilon = epsilon
 
         self.projector = Projector(projector_dims) if project else None
         self.target.requires_grad_(False)
+
+        self.forward_f = self._batched_forward if batched else self._default_forward
 
     def _forward_target(self, x, masks_ctx, masks_tgt):
         with torch.no_grad():
@@ -53,7 +61,7 @@ class VICReg(nn.Module):
                     (1.0 - momentum) * param_q.detach().data
                 )
 
-    def forward(self, x, masks_ctx, masks_tgt):
+    def _default_forward(self, x, masks_ctx, masks_tgt):
         z_ctx = self.encoder(x, masks_ctx)
         z_tgt = self._forward_target(x, masks_ctx, masks_tgt)
         z_pred_tgt = self.predictor(z_ctx, masks_ctx, masks_tgt)
@@ -66,6 +74,8 @@ class VICReg(nn.Module):
         if not self.std_cov_grad:
             z_ctx = z_ctx.detach()
 
+        z_ctx = z_ctx.view(-1, z_ctx.size(-1))
+
         if self.project:
             z_ctx = self.projector(z_ctx)
 
@@ -74,8 +84,8 @@ class VICReg(nn.Module):
         z_ctx = z_ctx - z_ctx.mean(dim=0)
 
         # 3. Compute variance loss
-        std_z_ctx = torch.sqrt(z_ctx.var(dim=0) + 0.0001)
-        std_loss = torch.mean(F.relu(1 - std_z_ctx))
+        std_z_ctx = torch.std(z_ctx, dim=0, correction=False) + self.epsilon
+        std_loss = torch.mean(F.relu(self.gamma - std_z_ctx))
 
         # 4. Compute covariance loss
         cov_z_ctx = (z_ctx.T @ z_ctx) / (z_ctx.size(0) - 1)
@@ -87,3 +97,43 @@ class VICReg(nn.Module):
             + self.cov_coeff * cov_loss
         )
         return loss, inv_loss, std_loss, cov_loss
+
+    def _batched_forward(self, x, masks_ctx, masks_tgt):
+        z_ctx = self.encoder(x, masks_ctx)
+        z_tgt = self._forward_target(x, masks_ctx, masks_tgt)
+        z_pred_tgt = self.predictor(z_ctx, masks_ctx, masks_tgt)
+
+        # 1. Compute invariance loss
+        inv_loss = F.mse_loss(z_pred_tgt, z_tgt)
+
+        if not self.std_cov_grad:
+            z_ctx = z_ctx.detach()
+
+        B, L, D = z_ctx.shape
+        if self.project:
+            z_ctx = z_ctx.view(-1, D)
+            z_ctx = self.projector(z_ctx)
+            z_ctx = z_ctx.view(B, L, z_ctx.size(-1))
+            B, L, D = z_ctx.shape
+
+        # 2. Gather from all gpus
+        z_ctx = torch.cat(FullGatherLayer.apply(z_ctx.contiguous()), dim=0)  # (B, L, D)
+        z_ctx = z_ctx - z_ctx.mean(dim=1, keepdim=True)
+
+        # 3. Compute variance loss
+        std_z_ctx = torch.std(z_ctx, dim=1, correction=False) + self.epsilon  # (B, D)
+        std_loss = torch.mean(F.relu(self.gamma - std_z_ctx))
+
+        # 4. Compute covariance loss
+        cov_z_ctx = (z_ctx.transpose(1, 2) @ z_ctx) / (L - 1)  # (B, D, D)
+        cov_loss = torch.mean(batch_off_diagonal(cov_z_ctx).pow_(2).sum(dim=1).div(D))
+
+        loss = (
+            self.inv_coeff * inv_loss
+            + self.std_coeff * std_loss
+            + self.cov_coeff * cov_loss
+        )
+        return loss, inv_loss, std_loss, cov_loss
+
+    def forward(self, x, masks_ctx, masks_tgt):
+        return self.forward_f(x, masks_ctx, masks_tgt)
