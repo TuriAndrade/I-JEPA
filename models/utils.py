@@ -158,17 +158,6 @@ def off_diagonal(x):
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
 
-def batch_off_diagonal(x):
-    B, D, _ = x.shape
-    assert D == x.shape[2], "Input must be of shape (B, D, D)"
-
-    return (
-        x.flatten(start_dim=1)[:, :-1]
-        .view(B, D - 1, D + 1)[:, :, 1:]
-        .flatten(start_dim=1)
-    )
-
-
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
 
