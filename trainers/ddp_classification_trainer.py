@@ -324,7 +324,7 @@ class DDPClassificationTrainer:
 
                 self.report_generator.update_global_metrics(device=rank)
                 self.report_generator.save_best_models(
-                    models={self.model_name: model.module},
+                    models={self.model_name: model.module if world_size > 1 else model},
                     device=rank,
                 )
                 self.report_generator.save_metrics(device=rank)
