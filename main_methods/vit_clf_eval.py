@@ -12,6 +12,7 @@ import os
 def main(
     model_ckpt_path,
     model_config_path,
+    batch_size=128,
     save_path=None,
     dataset_name="imagenet_100",
     model_name="vit_tiny",
@@ -64,7 +65,7 @@ def main(
         batch_collator_config=batch_collator_cfg,
         save_path=save_path,
         hdf5_dataset_test_config=hdf5_dataset_test_cfg,
-        batch_size=128,
+        batch_size=batch_size,
         seed=42,
         n_bootstraps=1000,
         confidence_level=95,

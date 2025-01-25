@@ -25,58 +25,6 @@ def vit_predictor_tiny(
     }
 
 
-def mutual_information_predictor_tiny(
-    img_size=224,
-    patch_size=16,
-    use_spectral_norm=False,
-    mse_factor=1,
-    mi_factor=1,
-):
-    return {
-        "num_patches": (img_size // patch_size) ** 2,
-        "embed_dim": 192,
-        "predictor_embed_dim": 192,
-        "depth": 4,
-        "num_heads": 3,
-        "mlp_ratio": 4.0,
-        "qkv_bias": True,
-        "qk_scale": None,
-        "drop_rate": 0.1,
-        "attn_drop_rate": 0.1,
-        "drop_path_rate": 0.1,
-        "norm_layer": partial(nn.LayerNorm, eps=1e-6),
-        "init_std": 0.02,
-        "ma_rate": 0.01,
-        "mse_factor": mse_factor,
-        "mi_factor": mi_factor,
-        "use_spectral_norm": use_spectral_norm,
-    }
-
-
-def mutual_information_estimator_tiny(
-    img_size=224,
-    patch_size=16,
-    use_spectral_norm=False,
-):
-    return {
-        "num_patches": (img_size // patch_size) ** 2,
-        "embed_dim": 192,
-        "predictor_embed_dim": 192,
-        "depth": 4,
-        "num_heads": 3,
-        "mlp_ratio": 4.0,
-        "qkv_bias": True,
-        "qk_scale": None,
-        "drop_rate": 0.1,
-        "attn_drop_rate": 0.1,
-        "drop_path_rate": 0.1,
-        "norm_layer": partial(nn.LayerNorm, eps=1e-6),
-        "init_std": 0.02,
-        "ma_rate": 0.01,
-        "use_spectral_norm": use_spectral_norm,
-    }
-
-
 def vit_tiny(
     img_size=224,
     patch_size=16,
@@ -221,8 +169,6 @@ model_configs = {
     "vic_reg_10_1_1_tiny": vic_reg_10_1_1_tiny,
     "vic_reg_25_4_2_tiny": vic_reg_25_4_2_tiny,
     "vit_predictor_tiny": vit_predictor_tiny,
-    "mutual_information_predictor_tiny": mutual_information_predictor_tiny,
-    "mutual_information_estimator_tiny": mutual_information_estimator_tiny,
 }
 
 

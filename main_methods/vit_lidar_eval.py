@@ -12,6 +12,7 @@ import os
 def main(
     model_ckpt_dir,
     model_config_path,
+    batch_size=128,
     save_path=None,
     dataset_name="imagenet_100",
     encoder_name="vit_tiny",
@@ -73,7 +74,7 @@ def main(
         hdf5_dataset_test_config=hdf5_dataset_test_cfg,
         test_data_frac=1,
         lidar_config={},
-        batch_size=128,
+        batch_size=batch_size,
         seed=42,
     )
     evaluator = LiDAREvaluation(**evaluator_cfg)

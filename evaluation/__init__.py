@@ -1,2 +1,2 @@
 from .classification_evaluation import ClassificationEvaluation
-from .lidar_evaludation import LiDAREvaluation
+from .lidar_evaluation import LiDAREvaluation
