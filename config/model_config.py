@@ -61,6 +61,16 @@ def vit_tiny(
     }
 
 
+def mine_vit_tiny(input_size=384, hidden_size=192):
+    return {
+        "input_size": input_size,
+        "hidden_size": hidden_size,
+        "init_std": 0.02,
+        "ma_et": 1.0,
+        "ma_rate": 0.01,
+    }
+
+
 def vic_reg_25_25_1_tiny(
     apply_reg=True,
     project=True,
@@ -161,6 +171,7 @@ def vic_reg_25_4_2_tiny(
 
 model_configs = {
     "vit_tiny": vit_tiny,
+    "mine_vit_tiny": mine_vit_tiny,
     "vic_reg_25_25_1_tiny": vic_reg_25_25_1_tiny,
     "vic_reg_10_10_1_tiny": vic_reg_10_10_1_tiny,
     "vic_reg_25_1_1_tiny": vic_reg_25_1_1_tiny,

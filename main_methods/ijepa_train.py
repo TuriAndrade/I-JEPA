@@ -72,7 +72,6 @@ def main(
         model_name=predictor_name,
         img_size=img_size,
         patch_size=patch_size,
-        use_spectral_norm=use_spectral_norm,
     )
 
     #

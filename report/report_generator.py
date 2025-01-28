@@ -112,6 +112,7 @@ class ReportGenerator:
 
     def save_params(
         self,
+        filename="trainer_params.json",
         device=None,
     ):
         if (device is None) or (device == self.main_device):
@@ -121,7 +122,7 @@ class ReportGenerator:
             }
 
             # Save the dictionary to a JSON file
-            with open(os.path.join(self.save_path, "trainer_params.json"), "w") as f:
+            with open(os.path.join(self.save_path, filename), "w") as f:
                 json.dump(params_dict, f, cls=CustomJSONEncoder, indent=4)
 
     def save_models(
@@ -197,9 +198,9 @@ class ReportGenerator:
 
                     self.should_save_local_best[path] = False
 
-    def save_metrics(self, device=None):
+    def save_metrics(self, filename="train_metrics.json", device=None):
         if (device is None) or (device == self.main_device):
-            with open(os.path.join(self.save_path, "train_metrics.json"), "w") as f:
+            with open(os.path.join(self.save_path, filename), "w") as f:
                 json.dump(self.global_metrics_dict, f, cls=CustomJSONEncoder, indent=4)
 
     def save_plots(self, device=None):
