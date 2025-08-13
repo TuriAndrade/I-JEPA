@@ -1,4 +1,4 @@
-# JEPA — I-JEPA with VICReg and Simplicial Embeddings
+I-JEPA with VICReg and Simplicial Embeddings
 
 This repository implements **I-JEPA** (Image Joint-Embedding Predictive Architecture) and proposes two information-theoretic upgrades that improve downstream accuracy on ImageNet-100:
 
