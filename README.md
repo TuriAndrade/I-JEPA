@@ -46,12 +46,6 @@ The **best results** come from combining both: **I-JEPA + SEM + VICReg**.
 
 ---
 
-## Notes on representation analysis
-
-We also computed **MINE** (mutual information) and **LiDAR** scores during pretraining. Although **I-JEPA + VICReg** sometimes showed higher MINE/LiDAR than **I-JEPA + SEM + VICReg**, the latter still produced **better classification accuracy**, suggesting SEM’s sparsity/structure improves generalization even if MI estimates decrease due to lower entropy.
-
----
-
 ## References
 
 - I-JEPA: Assran et al., 2023  
