@@ -43,6 +43,8 @@ The **best results** come from combining both: **I-JEPA + SEM + VICReg**.
 - **SEM + VICReg** is consistently the strongest, especially in low-label regimes.
 
 > **Disclaimer**: These models were **not** extensively tuned due to limited computing resources. Results focus on **relative comparison** between methods rather than achieving the highest possible accuracy.
+>  
+> For more information, read the **project_report.pdf** available in this repository.
 
 ---
 
